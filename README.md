@@ -12,12 +12,12 @@ ZQU-Foray 的 RMUL 2027 3v3 **场地仿真仓**：在 Gazebo 里搭出赛季场�
 | 编号 | 需求 | 验收口径 |
 |---|---|---|
 | A0 | 场地资产可用 | `foray_rmul_2027_field` 的世界能在 Gazebo 启动、无报错加载 |
-| A1 | 32 线点云 | `/livox/lidar` 上 PointCloud2 为 **32 线**（`height=32`）、`width=1875`、nominal **10 Hz**（MID-360 实际出点率）；软件渲染 CI 实测 ≥ 6.5 Hz、GPU 直通达 10 Hz；`/livox/imu` 200 Hz 生效 |
+| A1 | 32 线点云 | `/livox/lidar` 上 PointCloud2 为 **32 线**（`height=32`）、`width=1875`、nominal **10 Hz**（MID-360 实际出点率）；软件渲染 CI 实测 ≥ 6.5 Hz、GPU 直通达 10 Hz；`/livox/imu` 配置 `update_rate: 200`，实测随 RTF 缩放（软件渲染约 156 Hz） |
 | A2 | 定位收敛 | `foray_localization` 在仿真里 10 s 内状态 OK，位置误差 < 0.30 m、朝向误差 < 5° |
-| A3 | 寻路可达 | Nav2 把机器人从起点送到隧道对侧（净空 0.2495 m 的场地几何）`SUCCEEDED` |
+| A3 | 寻路可达 | Nav2 把机器人从起点送到隧道对侧（净空 0.2495 m 的场地几何）`SUCCEEDED`，且轨迹采样点（≥ 5 Hz）至少一个落在隧道顶投影 x 3.325–3.675 / y 7.06–7.86 内 |
 | A4 | 地图契约 | manifest 哈希与 `foray_localization` 一致，篡改 1 字节必须拒绝启动 |
 | A5 | 地图同源 | 由网格采样的 PCD 与官方地图的占据 IoU ≥ 0.90 |
-| A6 | 一键启动 | `sim_up.sh` 300 s 内整链起来 |
+| A6 | 一键启动 | `sim_up.sh` 300 s 内整链起来（仿真 + 桥 + 定位 + Nav2 全部 active） |
 | A7 | 致谢完整 | 三方来源的归属链写进 `THIRD_PARTY_NOTICES.md` |
 
 进度与阶段划分见 `plan.md`；关键取舍见 `decision.md`。
@@ -47,8 +47,11 @@ foray_simulation/
 │   │   └── tools/                    # 上游审计/生成脚本（只读参考）
 │   └── foray_simulation_bringup/     # 启动层（launch / config / 地图 / 脚本）
 │       ├── map/rmul_2027/            # PCD + PGM + manifest.yaml（定位侧输入）
-│       ├── scripts/                  # make_pcd.py / make_manifest.py / sim_up.sh
-│       └── test/                     # A4 / A5 回归
+│       ├── map/nav2/                 # 派生导航栅格（只清隧道顶投影，见 D16）
+│       ├── launch/                   # simulation / localization_sim / navigation_sim
+│       ├── config/                   # bridge / point_lio_sim / nav2_params_sim
+│       ├── scripts/                  # make_pcd / make_manifest / make_nav_map / sim_up / accept
+│       └── test/                     # A4 / A5 / 导航栅格回归
 ├── README.md  AGENTS.md  tree.md  plan.md  decision.md
 └── THIRD_PARTY_NOTICES.md
 ```
@@ -61,7 +64,11 @@ gz-sim 场地世界 (rmul_2027.sdf)
                                             │
                      ign_sim_pointcloud_tool（补 time 字段）
                                             ▼
-                                      point_lio ──► odom→base TF
+                                      point_lio ──► /aft_mapped_to_init（camera_init→body）
+                                            │
+                        loam_interface ──► /lidar_odometry + /cloud_registered
+                                            │
+                   sensor_scan_generation ──► odom→base_footprint TF + /odometry
                                             │
              先验地图 manifest.yaml ◄── foray_localization（重定位）
                                             ▼
@@ -71,6 +78,8 @@ gz-sim 场地世界 (rmul_2027.sdf)
 ```
 
 先验地图与栅格**同源**：两者都从场地网格派生，因此定位与 Nav2 不会各说各话。
+不过两者的**判据不同**：定位吃官方 PGM 的稠密占据面，Nav2 需要底盘可通行栅格，
+由 `make_nav_map.py` 从官方图派生并只打开隧道顶投影（`decision.md` D16）。
 
 ## 5. 复现
 
@@ -88,9 +97,25 @@ python3 src/foray_simulation_bringup/scripts/make_manifest.py \
 # 3) 跑回归（A4 清单契约 / A5 地图同源 / 场地资源断言）
 colcon test --packages-select foray_rmul_2027_field foray_simulation_bringup
 
-# 4) 起整链
+# 4) 派生 Nav2 可通行栅格（只清隧道顶投影，幂等）
+python3 src/foray_simulation_bringup/scripts/make_nav_map.py \
+    --official-pgm src/foray_rmul_2027_field/maps/rmul_2027/rmul_2027.pgm \
+    --official-yaml src/foray_rmul_2027_field/maps/rmul_2027/rmul_2027.yaml \
+    --out-pgm src/foray_simulation_bringup/map/nav2/rmul_2027_nav.pgm \
+    --out-yaml src/foray_simulation_bringup/map/nav2/rmul_2027_nav.yaml
+
+# 5) 起整链（仿真 + 桥 + 定位 + Nav2；`--no-nav` 只起定位）
 src/foray_simulation_bringup/scripts/sim_up.sh
+
+# 6) 运行时验收（另开终端；A6 / A2 / A3 各一条）
+ros2 run foray_simulation_bringup accept.py ready --deadline 300
+ros2 run foray_simulation_bringup accept.py a2 --duration 70
+ros2 run foray_simulation_bringup accept.py a3 --x 2.0 --y 7.4
 ```
+
+`accept.py` 每条子命令只打印单行 `key=value` 并给出 `verdict=PASS|FAIL`，
+判据与 `decision.md` D13（A2）、D18（验收脚本入库）一致；没有真值时它会打印
+`ground_truth=none` 而不是假装通过。
 
 ## 6. 地图判定口径（勿改而不留痕）
 

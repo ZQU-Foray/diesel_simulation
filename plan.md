@@ -5,9 +5,12 @@
 
 ## 当前断点（2026-10-30）
 
-**I1–I6、I9 完成（A2 已在仿真里取证通过、仓级门禁已接入），I7–I8 未做。**
+**I1–I6、I9 完成（A2 已在仿真里取证通过、仓级门禁已接入），I7 代码与文档完成但
+运行时判定被外部阻塞，I8 / I10 未做。**
 I6 的三处根因与取证见 `decision.md` D11/D12/D13；D9 的「回调从未被调用」已更正。
-I9（组织规则同步）的取舍与代价见 D14/D15。
+I7（导航装配、派生栅格、验收脚本）见 D16/D17/D18；I9（组织规则同步）见 D14/D15；
+许可证见 D19。**A3/A6 的运行时判定被 `foray_localization` 的 GICP 后端阻塞**，
+取证与待办见下方「阻塞与待确认」与 I10。
 
 ## M1 场地资产（A0 / A5 的一半）
 
@@ -53,14 +56,27 @@ I9（组织规则同步）的取舍与代价见 D14/D15。
       回执：默认参数 95 s 采样 4737 条状态 ⇒ `{INITIALIZING: 314, OK: 4423}`、零 DEGRADED/LOST；
       首次 OK 在仿真 3.78 s，位姿 `(6.0606, 4.0425)`，与真值 `(6.0, 4.0, 0.011)` 相差
       **0.083 m**，`yaw=0.012°`；`/aft_mapped_to_init` 7.1 Hz、静止漂移毫米级。
-- [ ] **I7**：`config/nav2_params_sim.yaml` + `launch/navigation_sim.launch.py` + 把
-      `scripts/sim_up.sh` 扩成「仿真 + 定位 + Nav2」一键；验收：Nav2 穿过隧道 `SUCCEEDED`、
-      `sim_up.sh` 300 s 内起整链（A3 / A6）。
+- [~] **I7 导航装配与整链（A3 / A6，见 D16/D17/D18）**：代码与文档已落盘，运行时判定待外部修复。
+      已完成：`scripts/make_nav_map.py` + `map/nav2/rmul_2027_nav.{pgm,yaml}`（从官方图派生，
+      只清隧道顶投影 462 格，`test_nav_map.py` 断言差异有界与通道宽度 ≥ 0.70 m）；
+      `config/nav2_params_sim.yaml`（omni 控制器、`inflation_radius 0.20`、footprint 四点、
+      res 0.025/0.05、只用静态层）；`launch/navigation_sim.launch.py`（`loam_interface` +
+      `sensor_scan_generation` 补 `odom→base_footprint`，再 TimerAction 起 map_server 与
+      `nav2_bringup/navigation_launch.py`）；`scripts/sim_up.sh` 默认起整链；
+      `scripts/accept.py` 三条子命令（`ready` / `a2` / `a3`）。
+      回执（代码级）：`colcon test` 3/3（`manifest_consistency` / `pcd_align` / `nav_map`）、
+      `ros2 pkg executables` 含 `make_nav_map.py` 与 `accept.py`、`navigation_sim.launch.py --show-args` 通过、
+      整链起后 `map_server` 成功加载派生图并激活、`lifecycle_manager_navigation` 把
+      controller/planner/behavior/bt_navigator/waypoint_follower/velocity_smoother 全部激活、
+      `/odometry` 2.2 Hz（说明 `loam_interface`→`sensor_scan_generation` 接线生效）。
+      **未完成**：`accept.py ready` 仍是 `localization_s=none`，因为 `foray_localization`
+      在本次会话期间切到 PCL GICP 后端且无法收敛（见 I10），A3/A6 的正式判定要等它修好。
 - [x] **I9 组织规则同步（D14/D15）**：补齐 `CODEOWNERS`、`.clang-format`、`pyproject.toml`、
       `.github/workflows/ci.yml` 与 `scripts/ci/{check_style,check_tree_doc,check_layer}.py`；
       现有 14 个 `.py` 通过 ruff+black，导出素材行尾统一 LF；`tree.md` 重写为逐文件镜像
       （91 文件 / 30 目录）。回执：三条门禁全绿、`ruff check` 0 问题、`black --check` 0 待改。
-      欠账：`gate-selftest` 未做（见 D15）；`foray_docs` 的仓表与 scope 词表尚未收录本仓。
+      后续：`gate-selftest` 已在 I7 补上（D18）；`foray_docs` 的仓表与 scope 词表尚未收录本仓。
+- [ ] **I10**：解除 A3/A6 判定阻塞（外部仓 GICP，见「阻塞与待确认」）。
 - [ ] **I8**：跨仓收尾——`foray_ws/.repos` 增 `foray_simulation`，`foray_docs`
       §6.6 加 scope 词表、`repository_structure.md` 补仓列表，`foray_localization/decision.md`
       的 D17 一并提交。
@@ -73,6 +89,20 @@ I9（组织规则同步）的取舍与代价见 D14/D15。
   实测最坏帧间隔（p99 1.01 s、最长 1.60 s）留的余量；若换到更快的机器可再收紧。
 - **A2 整链门有已知脆弱点**：残留的上一轮 `ign_sim_pointcloud_tool` 进程 + 宿主高负载
   会让它误判成 LOST（D15 有实测）。重跑前先 `ps` 确认容器干净，必要时 `docker restart`。
+- **I10（新，阻塞 A3/A6 判定）**：2026-10-30 12:03 起 `foray_localization` 分支
+  `feat/pcl-gicp-aligner` 的提交 `5234023` 把配准后端换成 PCL GICP，容器内镜像也已被
+  并行会话重建。实测该后端在本场地**不收敛**：
+  - 真值位姿 (6.0, 4.0) 下对 0.25 m 体素先验图的最近邻残差 `mean=0.1069 m`、
+    `inlier(<0.10)=0.437`，而 `ok_mean_residual_m=0.10`、`ok_inlier_ratio=0.55`
+    ⇒ 健康门先天不满足（阈值与地图粒度不自洽）；
+  - 运行时把 `ok_mean_residual_m` 放宽到 0.30、`ok_inlier_ratio` 放宽到 0.05、
+    `odom_timeout_sec`/`lidar_timeout_sec` 放宽到 5 s、`align_rate_hz` 降到 2 Hz
+    后，`/localization/state` 仍是 `state: 3`（LOST）、`reason: initialization timeout`；
+  - 同条件下 `point_lio` 只有 1.3 Hz（`/livox/lidar` 6.7 Hz），GICP 常驻 41% CPU，
+    宿主 load 41 / 12 核导致 RTF 塌陷，也会单独触发 `odom_timeout_sec`。
+  结论：**这不是本仓能修的问题**（本仓只装配），需 `foray_localization` 侧把 GICP 的
+  质量口径与 0.25 m 体素地图对齐、或恢复可用后端；修好后在本仓执行
+  `accept.py ready --deadline 300` + `accept.py a3 --x 2.0 --y 7.4` 即可补上 A3/A6 回执。
 - **仓已迁至 `~/Projects/RoboMaster/foray_simulation`**（2026-10-29 起为日常开发副本，
   `remote` 用 https + gh CLI 凭据；`foray_localization/local/staging/` 下的旧副本不再使用）。
 

@@ -251,3 +251,77 @@ localization 的 D15/D18 已经证明「恒跳过的门禁」是本组织最真�
 叠加宿主 `loadavg 14.6`（12 核）⇒ 帧率塌陷触发 LOST。`docker restart` 清空后同一套用例
 `8 passed`。所以**整链门只当本地人工回归用，判红前先确认容器内没有残留 gz/ign 进程**；
 这也是它不进 CI 的又一条理由（runner 上无法保证这种干净度）。
+
+## D16 Nav2 用**派生**导航栅格，官方 PGM 只给定位
+
+**决定**：定位继续吃 `src/foray_rmul_2027_field/maps/rmul_2027/rmul_2027.pgm`（A4/A5 的
+哈希契约不动），Nav2 另起一张**派生图** `src/foray_simulation_bringup/map/nav2/rmul_2027_nav.pgm`，
+由 `scripts/make_nav_map.py` 从官方图逐像素复制后，只把隧道顶投影矩形
+（x 3.325–3.675 / y 7.06–7.86，共 462 格）由全占据改成全自由，其余 res/origin/thresholds 逐字保持。
+
+**理由**：
+- 官方图把高地与隧道顶的**投影**都画成占据，对平面底盘偏保守；`parameters.json` 的
+  `limitations` 自己写着「The supplied PGM conservatively blocks highlands and tunnel roof
+  footprints for this planar robot」「A lidar-only occupancy slice differs from a chassis
+  traversability map」。也就是说，官方图不是「底盘能不能走」的图，直接喂 Nav2 必然判隧道不可通。
+- 反过来，从 PCD 重建栅格不成立：`map/rmul_2027/rmul_2027.pcd` 是 8 cm 采样（102433 点），
+  投到 0.025 m 栅格只点亮 1510 格，中间有洞，Nav2 会当成零星障碍物。
+- 隧道金属顶在 z 0.25–0.27，底盘包络 z 0–0.15，垂直净空 0.2495 m ⇒ 底盘物理上能过，
+  「占据」只对雷达投影成立。派生图清掉的正是这一块不该算给底盘的格子。
+
+**代价与护栏**：多一张图就必须防它被手改。`test/test_nav_map.py` 固化了三条断言：
+差异必须**只有**这 462 格且全部落在投影内（不许新增占据）、矩形内必须全自由、
+x=2.6/3.0/3.3375/3.5/3.6625/3.9/4.3 各列连续自由带 ≥ 0.70 m。生成脚本幂等
+（固定 PGM 头 + 只改 yaml 的 `image:` 行），仓库里的 sha256 是
+`00f3d2f775d7fbb784a0d2aa8153df60dbdc193082ac15e6cd9c62cbbc6eeb1b`。
+隧道顶投影的边界从 `parameters.json` 的 `highland_southwest` / `metal_strip_west_offset` /
+`metal_strip_width` / `highland_north_y` / `tunnel_clear_span` 现算，不在脚本里写死数字。
+
+## D17 `odom→base_footprint` 由上游 `sensor_scan_generation` 补，Nav2 只做装配
+
+**决定**：不自己写 TF 广播节点，用上游两件套补链条：
+`loam_interface`（`/aft_mapped_to_init` → `/lidar_odometry` + `/cloud_registered`，只发
+`odom→雷达` 的里程计消息，不发 TF）+ `sensor_scan_generation`（订阅这两条，发
+`odom→base_footprint` TF 与 `/odometry` 话题）。Nav2 本体用
+`IncludeLaunchDescription(nav2_bringup/launch/navigation_launch.py)` 装配，不手抄 8 个节点；
+`map_server` 与它的 lifecycle_manager 由本仓单独起，**不用 amcl**。
+
+**理由**：
+- `foray_localization` 只发 `map→odom`，`robot_state_publisher` 吃的是无 joint 的 SDF，
+  所以 `odom→base_footprint` 这一段在本仓原本是空的——Nav2 的 costmap 一查就
+  `Extrapolation Error ... from frame [base_footprint] to frame [map]`。
+- `sensor_scan_generation` 恰好就是干这件事的上游实现（`publishTransform(tf_odom_to_chassis,
+  odometry->header.frame_id, base_frame_)`），且 `robot_base_frame` 可配；我们没有云台，
+  三个 frame 参数都填 `base_footprint`。
+- 不启 amcl：amcl 会自己发 `map→odom`，和 `foray_localization` 抢同一条边，定位会跳。
+
+**代价**：`sensor_scan_generation` 依赖 `lidar→base` 静态 TF，那条边由
+`localization_sim.launch.py` 发，所以 `navigation_sim.launch.py` 必须 include 它而不是
+另起仿真；两个节点都用 `respawn=True` 兜住启动顺序。
+
+## D18 验收脚本入库（A2/A3/A6），门禁自检也入库
+
+**决定**：把运行时判据固化成 `scripts/accept.py`（`ready` / `a2` / `a3` 三条子命令，
+单行 `key=value` + `verdict=PASS|FAIL`），并把 `scripts/ci/selftest.py` 接进 CI。
+D15 里「A2 判据门脚本没入库」的欠账一并还清。
+
+**理由**：
+- 判据写在会话里、结论写在 `plan.md` 里，等于不可复现：D15 自己就记了一次误判
+  （残留进程 + 高负载 ⇒ 假 LOST）。判据只有变成能重跑的命令，才谈得上「取证」。
+- 脚本取不到真值时打印 `ground_truth=none` 并让判据失败，而不是悄悄用过默认起点——
+  假通过比判红危险。
+- `gate-selftest` 的理由同 D15 的欠账段落：一个被改坏的门禁会安静地一直通过。
+  `selftest.py` 复制仓库到临时目录、`git init` 后注入五类缺陷
+  （CRLF / tree 少一行 / 多一个未登记文件 / 删掉已登记文件 / `.foray-layer` 反向依赖），
+  断言对应门禁非零退出，最后跑干净副本必须三门全绿。它不需要 Docker，所以能进 CI。
+
+## D19 本仓采用 Apache-2.0
+
+**决定**：仓根 `LICENSE` 用 Apache License 2.0 全文（202 行，取自 Debian
+`/usr/share/common-licenses/Apache-2.0`，逐字节未经改写）；两个 `package.xml` 的
+`<license>` 由 `TODO` 改为 `Apache-2.0`；`THIRD_PARTY_NOTICES.md` §5 记版权行
+`Copyright 2026 ZQU-Foray` 与授权范围。
+
+**理由**：上游 `pb2025_*`、`rmu_gazebo_simulator`、`rmoss_*` 都是 Apache-2.0，同许可证
+才能逐文件搬用片段而不引入混用；同时保留专利授权与免责条款。场地迁移包与官方 STEP
+不在授权范围内（§2 已声明），本次不改它们的归属说明。
