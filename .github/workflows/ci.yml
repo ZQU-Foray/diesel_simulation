@@ -8,13 +8,14 @@
 #   layer-check     .foray-layer 依赖方向自洽（foray_docs §6.5）
 #   lint-python     Python 语法/格式（ruff + black）
 #   lint-c          C/C++ 格式（本仓当前无 C/C++，作业自动跳过）
+#   gate-selftest   往仓库副本注入已知缺陷，断言三门禁确实会红
 #   build-ros2      colcon 构建 + ros2 pkg executables + launch 解析 + colcon test
 #
 # 与 foray_localization 的差异（按本仓实际形态裁剪，不照抄）：
 #   - 无 param-contract / contract-lock：本仓不发布 msg/srv/action，参数清单
 #     在 README §4，由 doc-sync 与人工 Review 守；不是本仓的接口契约面。
-#   - 无 gate-selftest：门禁自检需要注入缺陷的沙箱，本仓先立门禁；
-#     自检脚本留待下一轮（decision.md D14 记了这条欠账）。
+#   - gate-selftest 用临时目录里的仓库副本注入缺陷（不需要 Docker 或仿真），
+#     只验三门禁本身会不会红；decision.md D18 记了这条从欠账到落地的经过。
 #   - dir-layout 不要求 include/：本仓两个包都是纯资源/装配包（project(... NONE)），
 #     手写 C++ 一旦进入本仓，规则要随之收紧。
 #   - field 包内有 tools/（上游 STEP 生成与审计脚本，只读参考、不被安装），
@@ -151,6 +152,17 @@ jobs:
         if: steps.detect.outputs.found == 'true'
         run: black --check --diff .
 
+  # ---- 门禁自检 ----
+  # 三门禁常绿不代表它们还能拦人：被改坏的正则会让 check_style 永远通过。
+  # 本作业在临时目录复制仓库、注入五类已知缺陷，断言对应门禁非零退出。
+  gate-selftest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 注入缺陷并断言门禁会红
+        run: python3 scripts/ci/selftest.py
+
   # ---- C/C++ 格式检查 ----
   # 本仓当前没有 C/C++ 源码，作业会走「未发现代码，跳过」分支；
   # 保留它是因为 tree.md 已声明 .clang-format 存在，将来加手写节点时门禁必须立刻生效。
@@ -232,12 +244,14 @@ jobs:
           # 脚本必须按 PROGRAMS 装进 lib/<pkg>/，否则 launch 会报
           # "executable ... not found on the libexec directory"
           ros2 pkg executables foray_simulation_bringup | tee /tmp/exes.txt
-          for exe in make_pcd.py make_manifest.py set_initial_pose.py sim_up.sh; do
+          for exe in make_pcd.py make_manifest.py make_nav_map.py set_initial_pose.py \
+                     accept.py sim_up.sh; do
             grep -qx "foray_simulation_bringup $exe" /tmp/exes.txt \
               || { echo "::error::ros2 pkg executables 缺少 $exe"; exit 1; }
           done
           # launch 文件必须能被解析（--show-args 不启动任何进程）
-          for launch_file in simulation.launch.py localization_sim.launch.py; do
+          for launch_file in simulation.launch.py localization_sim.launch.py \
+                            navigation_sim.launch.py; do
             ros2 launch foray_simulation_bringup "$launch_file" --show-args
           done
 
