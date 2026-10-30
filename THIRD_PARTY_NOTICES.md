@@ -42,5 +42,13 @@
 
 ## 5. 本仓自身的许可
 
-本仓自有代码的许可证见仓根 `LICENSE`（待补，当前 `package.xml` 中为 `TODO`）；
-在许可证确定前，第三方不得视为已获得授权。
+本仓自有代码与文档以 **Apache License 2.0** 发布，全文见仓根 [`LICENSE`](LICENSE)，
+版权行：`Copyright 2026 ZQU-Foray`。两个 `package.xml` 的 `<license>` 字段同为
+`Apache-2.0`，与 `LICENSE` 保持一致（`decision.md` D19）。
+
+选用 Apache-2.0 的动机：上游 `pb2025_*`、`rmu_gazebo_simulator` 与 `rmoss_*` 均为
+Apache-2.0，同一许可证可以逐文件搬用片段而不引入许可证混用；同时保留专利授权与
+免责条款。
+
+注意 §2 的场地迁移包与官方 STEP 文件**不在** Apache-2.0 覆盖范围内：本仓只对自有
+代码与文档授权，DJI / RoboMaster 图样与规则手册内容的版权仍归其所有者。
