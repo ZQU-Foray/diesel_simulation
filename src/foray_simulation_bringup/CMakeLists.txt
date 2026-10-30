@@ -14,7 +14,8 @@ install(
 )
 
 install(
-    PROGRAMS scripts/make_pcd.py scripts/make_manifest.py scripts/set_initial_pose.py
+    PROGRAMS scripts/make_pcd.py scripts/make_manifest.py scripts/make_nav_map.py
+             scripts/set_initial_pose.py
              scripts/sim_up.sh
     DESTINATION lib/${PROJECT_NAME}
 )
@@ -39,6 +40,18 @@ if(BUILD_TESTING)
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     )
     set_tests_properties(pcd_align PROPERTIES TIMEOUT 120)
+
+    # A3 前置：派生导航栅格只许打开隧道开放段，且走廊宽度够规划
+    add_test(
+        NAME nav_map
+        COMMAND python3 test/test_nav_map.py
+                --official-pgm ../foray_rmul_2027_field/maps/rmul_2027/rmul_2027.pgm
+                --official-yaml ../foray_rmul_2027_field/maps/rmul_2027/rmul_2027.yaml
+                --parameters ../foray_rmul_2027_field/maps/rmul_2027/parameters.json
+                --nav-pgm map/nav2/rmul_2027_nav.pgm
+                --nav-yaml map/nav2/rmul_2027_nav.yaml
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    )
 endif()
 
 ament_package()
