@@ -325,3 +325,25 @@ D15 里「A2 判据门脚本没入库」的欠账一并还清。
 **理由**：上游 `pb2025_*`、`rmu_gazebo_simulator`、`rmoss_*` 都是 Apache-2.0，同许可证
 才能逐文件搬用片段而不引入混用；同时保留专利授权与免责条款。场地迁移包与官方 STEP
 不在授权范围内（§2 已声明），本次不改它们的归属说明。
+
+## D20 `cmd_vel` 桥接的 gz 侧话题必须带 `/model/` 前缀
+
+**决定**：`src/foray_simulation_bringup/config/bridge.yaml` 的 `cmd_vel` 条目的
+`gz_topic` 由 `/foray_sim_robot/cmd_vel` 改为 `/model/foray_sim_robot/cmd_vel`。
+
+**理由（实测证据）**：`ignition-gazebo-velocity-control-system` 在模型命名空间下订阅，
+启动日志原话是 `VelocityControl subscribing to twist messages on
+[/model/foray_sim_robot/cmd_vel]`。原来的桥接把 ROS `/cmd_vel` 转发到
+`/foray_sim_robot/cmd_vel`，桥接日志照样打印「Creating ROS->GZ Bridge」、ROS 侧
+`ros2 topic pub` 也照常成功，**但车永远不动**——是一个只靠 `ign topic -l` 看不出、
+只有对比真值位姿才会暴露的静默错接。
+
+- 错接时：`ros2 topic pub -r 20 /cmd_vel ... "{linear: {x: 0.5}}"` 持续 10 s，
+  `/sim/pose_info` 里 `foray_sim_robot` 一直停在 (6.0, 4.0)。
+- 改对后：同样命令 9 s，真值 x 由 6.0 变 7.35（墙钟 9 s、RTF ≈ 0.3，与
+  `0.5 m/s × 仿真时间` 相符）。
+
+**影响**：A3（Nav2 穿隧道）在修复前不可能通过——`controller_server` 只会反复
+`Failed to make progress`，因为速度从未进到物理引擎。A1/A2/A4/A5 不涉及运动，
+所以这个错接从迁移起一直没被发现。凡是以后改模型或桥接，必须用「发速度 + 读真值」
+验证闭环，不能只看话题列表。
