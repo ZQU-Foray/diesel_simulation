@@ -15,7 +15,7 @@ install(
 
 install(
     PROGRAMS scripts/make_pcd.py scripts/make_manifest.py scripts/make_nav_map.py
-             scripts/set_initial_pose.py
+             scripts/set_initial_pose.py scripts/accept.py
              scripts/sim_up.sh
     DESTINATION lib/${PROJECT_NAME}
 )
