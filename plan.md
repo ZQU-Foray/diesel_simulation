@@ -3,13 +3,15 @@
 > 状态：`[x]` 已完成并有可追溯回执 · `[~]` 进行中 · `[ ]` 未开始。
 > 任意时刻中断后从这里恢复。
 
-## 当前断点（2026-10-30）
+## 当前断点（2026-11-02）
 
 **I1–I6、I9 完成（A2 已在仿真里取证通过、仓级门禁已接入），I7 代码与文档完成但
-运行时判定被外部阻塞，I8 / I10 未做。**
+运行时判定被外部阻塞，I8 / I10 未做。** 上述工作全部落在分支 `feat/i7-nav-a6`
+（相对 `origin/dev` 共 8 个提交），本地 `dev` 已快进到 `origin/dev`（`05b6992`）。
 I6 的三处根因与取证见 `decision.md` D11/D12/D13；D9 的「回调从未被调用」已更正。
-I7（导航装配、派生栅格、验收脚本）见 D16/D17/D18；I9（组织规则同步）见 D14/D15；
-许可证见 D19。**A3/A6 的运行时判定被 `foray_localization` 的 GICP 后端阻塞**，
+I7（导航装配、派生栅格、验收脚本、`cmd_vel` 桥接修正）见 D16/D17/D18/D20；
+I9（组织规则同步）见 D14/D15；许可证见 D19。
+**A3/A6 的运行时判定被 `foray_localization` 的 GICP 后端阻塞**，
 取证与待办见下方「阻塞与待确认」与 I10。
 
 ## M1 场地资产（A0 / A5 的一半）
@@ -63,12 +65,19 @@ I7（导航装配、派生栅格、验收脚本）见 D16/D17/D18；I9（组织�
       res 0.025/0.05、只用静态层）；`launch/navigation_sim.launch.py`（`loam_interface` +
       `sensor_scan_generation` 补 `odom→base_footprint`，再 TimerAction 起 map_server 与
       `nav2_bringup/navigation_launch.py`）；`scripts/sim_up.sh` 默认起整链；
-      `scripts/accept.py` 三条子命令（`ready` / `a2` / `a3`）。
-      回执（代码级）：`colcon test` 3/3（`manifest_consistency` / `pcd_align` / `nav_map`）、
+      `scripts/accept.py` 三条子命令（`ready` / `a2` / `a3`）；
+      `config/bridge.yaml` 的 `cmd_vel` gz 侧话题改为 `/model/foray_sim_robot/cmd_vel`
+      （D20：错接时桥接日志与 `ros2 topic pub` 都正常、车却不动；改后 0.5 m/s 发 9 s，
+      真值 x 由 6.0 变 7.35）。
+      回执（代码级，2026-10-30）：`colcon test` 3/3（`manifest_consistency` / `pcd_align` / `nav_map`）、
       `ros2 pkg executables` 含 `make_nav_map.py` 与 `accept.py`、`navigation_sim.launch.py --show-args` 通过、
       整链起后 `map_server` 成功加载派生图并激活、`lifecycle_manager_navigation` 把
       controller/planner/behavior/bt_navigator/waypoint_follower/velocity_smoother 全部激活、
       `/odometry` 2.2 Hz（说明 `loam_interface`→`sensor_scan_generation` 接线生效）。
+      回执（2026-11-02，`foray_sim:humble-fortress` 容器内独立复跑）：`colcon build` 2 包通过、
+      `colcon test` 4 个测试 0 failures（bringup 3 + field 的 `test_field_assets`）、
+      `scripts/ci` 三门禁与 `selftest.py` 全绿、`ruff check` / `black --check` 0 待改、
+      `tree.md` 与仓库 100 文件 / 31 目录双向一致。
       **未完成**：`accept.py ready` 仍是 `localization_s=none`，因为 `foray_localization`
       在本次会话期间切到 PCL GICP 后端且无法收敛（见 I10），A3/A6 的正式判定要等它修好。
 - [x] **I9 组织规则同步（D14/D15）**：补齐 `CODEOWNERS`、`.clang-format`、`pyproject.toml`、
