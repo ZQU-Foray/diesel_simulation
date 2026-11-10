@@ -68,6 +68,7 @@ def generate_launch_description():
             "headless": LaunchConfiguration("headless"),
             "gui": LaunchConfiguration("gui"),
             "rviz": LaunchConfiguration("rviz"),
+            "rviz_config": LaunchConfiguration("rviz_config"),
             "x": LaunchConfiguration("x"),
             "y": LaunchConfiguration("y"),
             "yaw": LaunchConfiguration("yaw"),
@@ -152,6 +153,11 @@ def generate_launch_description():
             DeclareLaunchArgument("headless", default_value="false"),
             DeclareLaunchArgument("gui", default_value="false"),
             DeclareLaunchArgument("rviz", default_value="false"),
+            DeclareLaunchArgument(
+                "rviz_config",
+                default_value="sim.rviz",
+                description="rviz/ 下的视图文件名（sim.rviz 验收最小集 / tune.rviz 调车全量视图）或绝对路径",
+            ),
             # 起点默认在蓝方半场中央，A3 终点在隧道西侧 (2.0, 7.4)
             DeclareLaunchArgument("x", default_value="6.0"),
             DeclareLaunchArgument("y", default_value="4.0"),

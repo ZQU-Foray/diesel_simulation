@@ -6,7 +6,9 @@
 ## 当前断点（2026-11-11）
 
 **I1–I6、I9 完成（A2 已在仿真里取证通过、仓级门禁已接入），I7 代码与文档完成但
-运行时判定被外部阻塞，I8 / I10 未做；M5 调车可视化（I11–I16）只做了勘察与规划，未开工。**
+运行时判定被外部阻塞，I8 / I10 未做；M5 调车可视化（I11–I16）里 I11 已实现
+（`rviz/tune.rviz` + `rviz_config` 参数 + `tune_configs` 门禁），窗口开窗回执待容器补跑，
+I12–I16 未开工。**
 上述工作全部落在分支 `feat/i7-nav-a6`，`origin/dev` 仍停在 `05b6992`，**本分支尚未发起 PR**
 （落后多少提交用 `git rev-list --count origin/dev..HEAD` 现查，不在文档里写死）。
 I6 的三处根因与取证见 `decision.md` D11/D12/D13；D9 的「回调从未被调用」已更正。
@@ -93,7 +95,8 @@ I9（组织规则同步）见 D14/D15；许可证见 D19。
 - [ ] **I8**：跨仓收尾——`foray_ws/.repos` 增 `foray_simulation`，`foray_docs`
       §6.6 加 scope 词表、`repository_structure.md` 补仓列表，`foray_localization/decision.md`
       的 D17 一并提交。
-- [ ] **I11–I16（M5 调车可视化）**：勘察与规划完成、未开工，逐项清单见下节
+- [ ] **I11–I16（M5 调车可视化）**：I11 代码与门禁完成（开窗回执待容器），I12–I16 未开工，
+      逐项清单见下节
       `## M5 调车可视化`；其中 I14 会新增对外话题，须先由 `foray_interfaces` 定契约。
 
 ## M5 调车可视化（调试支撑，不改 A0–A7 验收口径）
@@ -120,6 +123,10 @@ I9（组织规则同步）见 D14/D15；许可证见 D19。
       - 工具：`SetInitialPose`（`/initialpose`）、`SetGoal`（`/goal_pose`）、
         `PublishPoint`（`/clicked_point`）、`Measure`（量隧道净空）；
       - 两套视图预设：`TopDownOrtho`（对图、发目标）与 `Orbit`（看隧道顶与场地高差）。
+      - 状态（2026-11-11）：代码完成——`rviz/tune.rviz`、三层 `rviz_config` 透传、
+        `sim_up.sh --tune`、门禁 `test/test_tune_configs.py`（话题白名单 + 最小集不许改）
+        均已落在 `feat/i7-nav-a6`。**开窗、每项显示是否有数据、`/map` 是否双发布、
+        `Odometry` 是否支持 `Keep` 仍待容器回执**，故本项暂不勾选。
 - [ ] **I12 Gazebo GUI 补面板**（`config/gui.config`）：现在只有 `MinimalScene` +
       `GzSceneManager`。补 `WorldControl`（暂停/单步，调车时定住一帧）、`EntityTree`、
       `ComponentInspector`、`WorldStats`（可选再补 `TransformControl`、`ViewAngle`）；该文件由
@@ -172,7 +179,8 @@ I9（组织规则同步）见 D14/D15；许可证见 D19。
 |---|---|
 | 需求 A0–A7 | **6/8 有回执**：A0/A1/A2/A4/A5/A7 通过；**A3/A6 无 PASS 回执**（I10 未解） |
 | 计划 I1–I10 | **完成 7、进行中 1、未做 2**：I1–I6、I9 完成；I7 代码完成、判定阻塞；I8/I10 未做 |
-| 计划 I11–I16（M5） | **未开工**：2026-11-11 完成仓内勘察与外部参考比对，规划已写入 `## M5 调车可视化` |
+| 计划 I11–I16（M5） | **I11 已实现**（`tune.rviz` / `rviz_config` / `tune_configs` 门禁，
+宿主回执齐全；开窗与 `/map` 发布者待容器核）；I12–I16 未开工 |
 | `dev` 分支 | 落后本分支若干提交（`git rev-list --count origin/dev..HEAD` 现查），且其 `plan.md` 仍写 I7 未开始 ⇒ 从 `dev` 恢复会重做 I7；本分支以 PR 对齐 |
 
 本机复跑（`colcon` + 标准库脚本，不依赖容器）：
@@ -247,11 +255,14 @@ python3 scripts/ci/check_style.py && python3 scripts/ci/check_tree_doc.py \
 docker build -t foray_sim:humble-fortress docker/
 ros2 launch foray_simulation_bringup simulation.launch.py headless:=true
 
-# 调车窗口：今天能用的只有 rviz:=true（加载 rviz/sim.rviz 验收最小集）
+# 调车窗口：最小集（rviz/sim.rviz）
 ros2 launch foray_simulation_bringup navigation_sim.launch.py gui:=true rviz:=true
 
-# 调车窗口：M5（I11–I16）落地后才存在的入口，下面几条现在跑会报参数/文件不存在
-# ros2 launch foray_simulation_bringup navigation_sim.launch.py rviz:=true rviz_config:=tune.rviz  # I11
+# 调车窗口：全量视图（I11，已实现；开窗回执待容器）
+ros2 launch foray_simulation_bringup navigation_sim.launch.py rviz:=true rviz_config:=tune.rviz
+src/foray_simulation_bringup/scripts/sim_up.sh --gui --tune   # 等价简写
+
+# 调车窗口：其余入口要等 M5 后续阶段，下面几条现在跑会报参数/文件不存在
 # ros2 launch foray_simulation_bringup navigation_sim.launch.py rqt:=true                          # I13
 # python3 scripts/tune_report.py                                                                   # I15
 # ros2 run foxglove_bridge foxglove_bridge   # I16，浏览器开 https://studio.foxglove.dev 连接

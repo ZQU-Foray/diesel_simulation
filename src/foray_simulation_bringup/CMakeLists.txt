@@ -52,6 +52,13 @@ if(BUILD_TESTING)
                 --nav-yaml map/nav2/rmul_2027_nav.yaml
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     )
+
+    # 调车视图：rviz/tune.rviz 的话题白名单、sim.rviz 最小集不许被改、gz GUI 插件名
+    add_test(
+        NAME tune_configs
+        COMMAND python3 test/test_tune_configs.py
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    )
 endif()
 
 ament_package()

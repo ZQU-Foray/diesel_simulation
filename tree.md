@@ -115,7 +115,8 @@ foray_simulation/
         │   ├── point_lio_sim.yaml             #   point_lio 仿真参数（上游默认值）
         │   └── nav2_params_sim.yaml           #   Nav2 仿真参数（按 0.8 m 通道重标）
         ├── rviz/
-        │   └── sim.rviz                       #   仿真用 RViz 视图
+        │   ├── sim.rviz                       #   验收最小集视图（TF / 原始点云 / 先验图）
+        │   └── tune.rviz                      #   调车全量视图（代价图 / 规划 / 工具位）
         ├── map/
         │   ├── rmul_2027/
         │   │   ├── rmul_2027.pcd              #   定位先验点云（由网格采样）
@@ -138,7 +139,8 @@ foray_simulation/
         └── test/
             ├── test_pcd_align.py              #   A5：点云投影 vs 官方地图 IoU
             ├── test_manifest.py               #   A4：清单契约 + 篡改检测
-            └── test_nav_map.py                #   A3：派生图差异有界 + 通道宽度断言
+            ├── test_nav_map.py                #   A3：派生图差异有界 + 通道宽度断言
+            └── test_tune_configs.py           #   调车视图话题白名单 + gz GUI 插件名
 ```
 
 ## 职责边界

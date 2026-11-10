@@ -15,6 +15,8 @@ usage() {
 
   --gui           打开 Gazebo 图形界面（默认 headless 软件渲染）
   --rviz          同时打开 RViz
+  --rviz-config F RViz 视图（rviz/ 下的文件名，默认 sim.rviz；调车用 tune.rviz）
+  --tune          调车一键：等价于 --rviz --rviz-config tune.rviz
   --no-nav        只起仿真 + 定位，不起 Nav2
   --nav-delay S   Nav2 延后多少秒启动（默认取 launch 的 25.0）
   --x X           初始位姿 x（默认取 launch 的 6.0）
@@ -27,6 +29,7 @@ USAGE
 
 gui=false
 rviz=false
+rviz_config=""
 with_nav=true
 nav_delay=""
 pose_args=()
@@ -35,6 +38,8 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --gui) gui=true; shift ;;
         --rviz) rviz=true; shift ;;
+        --rviz-config) rviz_config="${2:?--rviz-config 需要一个视图文件名}"; shift 2 ;;
+        --tune) rviz=true; rviz_config=tune.rviz; shift ;;
         --no-nav) with_nav=false; shift ;;
         --nav-delay) nav_delay="${2:?--nav-delay 需要一个秒数}"; shift 2 ;;
         --x) pose_args+=("x:=${2:?--x 需要一个数值}"); shift 2 ;;
@@ -61,7 +66,16 @@ else
     fi
 fi
 
+# 给了视图就一定要开 RViz，否则参数被静默忽略、主人会以为窗口没配对
+if [[ -n $rviz_config ]]; then
+    rviz=true
+fi
+
 args=("gui:=$gui" "headless:=$headless" "rviz:=$rviz")
+# 视图名只在显式给出时透传：默认值由 launch 一处维护
+if [[ -n $rviz_config ]]; then
+    args+=("rviz_config:=$rviz_config")
+fi
 # 位姿只在显式给出时透传：让 launch 里的默认值成为唯一来源，避免脚本又藏一套默认值
 args+=("${pose_args[@]}")
 if [[ -n $nav_delay ]]; then

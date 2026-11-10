@@ -347,3 +347,25 @@ D15 里「A2 判据门脚本没入库」的欠账一并还清。
 `Failed to make progress`，因为速度从未进到物理引擎。A1/A2/A4/A5 不涉及运动，
 所以这个错接从迁移起一直没被发现。凡是以后改模型或桥接，必须用「发速度 + 读真值」
 验证闭环，不能只看话题列表。
+
+## D21 `rviz_config` 只收视图名或绝对路径，找不到就启动失败；调车视图另开 `tune.rviz`
+
+**决定**：`launch/simulation.launch.py` 新增 `rviz_config` 参数（默认 `sim.rviz`），
+并在 `localization_sim.launch.py`、`navigation_sim.launch.py` 逐层透传；
+`scripts/sim_up.sh` 增 `--rviz-config F` 与 `--tune` 简写。解析规则：含路径分隔的绝对
+路径直接用，否则拼 `share/rviz/<名字>`；文件不存在时抛错并列出现有候选，不静默空窗。
+调车视图另立 `rviz/tune.rviz`，`rviz/sim.rviz` 一字不改，仍作 A0/A2 取证的最小集。
+
+**理由**：
+- RViz 用不存在的 `-d` 配置启动时窗口照开、只是一片空场，调车时最容易被误判成
+  「话题没数据」。把失败前移到 launch 阶段，一行报错胜过半小时 echo。
+- 视图是调试物，不该随着调车需求反复改验收基线：`sim.rviz` 的显示项被
+  `test/test_tune_configs.py` 锁成 `{TF, /livox/lidar, /map}`，谁改谁红。
+- 手写 `.rviz` 的话题名打错时 RViz 只会显示空数据，所以话题进白名单
+  （每条注明来源：`bridge.yaml` / nav2 参数 / launch 常量），新话题必须显式登记。
+
+**已知限制（待容器回执）**：宿主没有 `rviz2`/`gz`，本轮只做到 YAML 结构、
+话题白名单与 launch 参数解析一级；「窗口真开出来且每项有数据」、
+`Odometry` display 是否支持 `Keep`（累积轨迹）、`/map` 是否被
+`foray_map_server` 与 nav2 `map_server` 双发布，都要在
+`foray_sim:humble-fortress` 容器里补证。
