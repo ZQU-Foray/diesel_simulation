@@ -6,8 +6,9 @@
 ## 当前断点（2026-11-11）
 
 **I1–I6、I9 完成（A2 已在仿真里取证通过、仓级门禁已接入），I7 代码与文档完成但
-运行时判定被外部阻塞，I8 / I10 未做。** 上述工作全部落在分支 `feat/i7-nav-a6`，
-`origin/dev` 仍停在 `05b6992`（落后本分支 9 个提交），**本分支尚未发起 PR**。
+运行时判定被外部阻塞，I8 / I10 未做；M5 调车可视化（I11–I16）只做了勘察与规划，未开工。**
+上述工作全部落在分支 `feat/i7-nav-a6`，`origin/dev` 仍停在 `05b6992`（落后本分支 10 个提交），
+**本分支尚未发起 PR**。
 I6 的三处根因与取证见 `decision.md` D11/D12/D13；D9 的「回调从未被调用」已更正。
 I7（导航装配、派生栅格、验收脚本、`cmd_vel` 桥接修正）见 D16/D17/D18/D20；
 I9（组织规则同步）见 D14/D15；许可证见 D19。
@@ -92,17 +93,79 @@ I9（组织规则同步）见 D14/D15；许可证见 D19。
 - [ ] **I8**：跨仓收尾——`foray_ws/.repos` 增 `foray_simulation`，`foray_docs`
       §6.6 加 scope 词表、`repository_structure.md` 补仓列表，`foray_localization/decision.md`
       的 D17 一并提交。
+- [ ] **I11–I16（M5 调车可视化）**：勘察与规划完成、未开工，逐项清单见下节
+      `## M5 调车可视化`；其中 I14 会新增对外话题，须先由 `foray_interfaces` 定契约。
+
+## M5 调车可视化（调试支撑，不改 A0–A7 验收口径）
+
+> 目的：在容器里调车时每一环都有窗口可看，不必退回 `ros2 topic echo` 手工盯。
+> 口径：本节是**工程支撑**（与 I9 同类），不是 `README.md` 的新需求；I14 会新增对外话题，
+> 必须先由 `foray_interfaces` 定契约、再回 `README.md` 立需求。
+
+现状（2026-11-11 勘察）：能给的窗口只有两个——Gazebo GUI（`config/gui.config` 里只有
+`MinimalScene` + `SceneManager`，纯 3D 场景）和 RViz2（`rviz/sim.rviz` 只有 `TF` /
+`/livox/lidar` / `/map`，俯视 `TopDownOrtho`）。`rqt` 在 launch、`package.xml`、
+`docker/Dockerfile` 里都没有出现；`model.sdf` 只有 `gpu_lidar` + `imu`，没有相机。
+
+- [ ] **I11 调车版 RViz 视图**（`rviz/tune.rviz` + `rviz_config:=` 启动参数）：验收最小集
+      `sim.rviz` 保持不动，另出一份全量视图：
+      - `RobotModel`（`/robot_description`，`robot_state_publisher` 已经起了）；
+      - `TF` 打开 `Show Names`，一眼看出 `map→odom→base_footprint→front_mid360` 断在哪；
+      - `/cloud_registered`（`loam_interface` 输出）与 `/lidar_odometry`；
+      - `/map` 与派生导航栅格 `rmul_2027_nav` 叠看（D16 的清隧道要在图上可验）；
+      - `local_costmap/costmap`、`global_costmap/costmap`、`/local_costmap/published_footprint`；
+      - `/plan`（全局）与 `/local_plan`（局部），以及 `/odometry` 累积成的轨迹；
+      - 工具：`SetInitialPose`（`/initialpose`）、`SetGoal`（`/goal_pose`）、
+        `PublishPoint`（`/clicked_point`）、`Measure`（量隧道净空）；
+      - 两套视图预设：`TopDownOrtho`（对图、发目标）与 `Orbit`（看隧道顶与场地高差）。
+- [ ] **I12 Gazebo GUI 补面板**（`config/gui.config`）：现在只有 `MinimalScene` +
+      `SceneManager`。补 `WorldControl`（暂停/单步，调车时定住一帧）、`EntityTree`、
+      `ComponentInspector`、`WorldStats`；该文件由 `simulation.launch.py` 用 `--gui-config`
+      传给 `gz sim`，改一份即对全链生效。
+- [ ] **I13 rqt 面板组**（`rqt:=true` + `config/rqt/tune.perspective`）：一次开出
+      `rqt_graph`（谁连谁）、`rqt_topic`（关键话题频率）、`rqt_plot`（`/cmd_vel` 与
+      `/odometry` 速度对照，调控制器先看这张）、`rqt_console`（过滤 `ros_gz_bridge` 噪声）、
+      `rqt_tf_tree`、`rqt_image_view`（等 I14）。基础镜像是 `osrf/ros:humble-desktop-full`，
+      rqt 大概率自带；缺则把 `ros-humble-rqt*` 补进 `docker/Dockerfile` 并在回执写清。
+- [ ] **I14 相机 / 图像链路（接口决策点，不阻塞 I11–I13）**：要在窗口里看点云以外的画面，
+      需 `model.sdf` 加 `camera` 传感器、`bridge.yaml` 加 `/camera/image_raw` 桥、RViz 加
+      `Image` 显示。这是**新增对外话题**，超出 `README.md` 现有 A0–A7，按「README 是唯一
+      需求源」必须先由 `foray_interfaces` 定契约（话题名、编码、`camera_info` 口径）再回
+      README 立需求；在此之前只规划、不动手。
+- [ ] **I15 话题健康快照**（`scripts/tune_report.py`）：把调车时反复手打的命令收成一个——
+      关键话题实测频率与帧间隔、`/localization/state` 的健康字段（`accept.py` 已订阅该契约）、
+      TF 链完整性、`/cmd_vel` 指令与 `/sim/pose_info` 真值对照；默认人读表格，`--json` 给机器。
+      不依赖仿真也能跑（空数据路径自检），并纳入 `colcon test` 回归。
+- [ ] **I16 浏览器路线（可选，无 X11 时的替代）**：`foxglove_bridge`（Humble 有
+      `ros-humble-foxglove-bridge`）→ Foxglove Studio 网页看 3D / 曲线 / 图像，还能顺手录
+      bag 复看。与 `use_sim_time` 的兼容性、网页端 `PointCloud2` 带宽都需实测；真要用就在
+      `docker/Dockerfile` 装包，并把「rqt 还是 foxglove」的取舍写进 `decision.md`。
+
+外部参考（2026-11-11 勘察）：
+
+- 上游 `rmu_gazebo_simulator` 的 `rviz/visualize.rviz`：`RobotModel` + `TF` + `LaserScan` +
+  `PointCloud2`(`/livox/lidar`) + `Camera`，工具位带 `SetInitialPose` / `SetGoal` /
+  `PublishPoint`——I11 的工具集照它对齐：
+  <https://github.com/SMBU-PolarBear-Robotics-Team/rmu_gazebo_simulator>
+- `pb2025_sentry_nav` 的 `pb2025_nav_bringup/rviz/nav2_default_view.rviz`：Nav2 官方视图，
+  costmap / plan 的显示项照它抄：
+  <https://github.com/SMBU-PolarBear-Robotics-Team/pb2025_sentry_nav>
+- `rmu_gazebo_simulator/scripts/player_web/`：Flask 网页面板（`ros_handler.py` 发布底盘 /
+  云台 / 发射指令），I16 网页路线的同类实现；
+- `foxglove_bridge` 与 `rqt_graph` 在 Humble 的可用性已核对：
+  <https://index.ros.org/p/foxglove_bridge/>、<https://index.ros.org/p/rqt_graph/>。
 
 ## 2026-11-11 完成度审计
 
-审计基线：`README.md` §1 的 A0–A7（唯一需求源）+ 本文件 I1–I10（计划）。`dev`（`05b6992`）
+审计基线：`README.md` §1 的 A0–A7（唯一需求源）+ 本文件 I1–I16（计划）。`dev`（`05b6992`）
 与本分支各复跑一次，结论如下。
 
 | 层面 | 结论 |
 |---|---|
 | 需求 A0–A7 | **6/8 有回执**：A0/A1/A2/A4/A5/A7 通过；**A3/A6 无 PASS 回执**（I10 未解） |
 | 计划 I1–I10 | **完成 7、进行中 1、未做 2**：I1–I6、I9 完成；I7 代码完成、判定阻塞；I8/I10 未做 |
-| `dev` 分支 | 落后本分支 9 个提交，且其 `plan.md` 仍写 I7 未开始 ⇒ 从 `dev` 恢复会重做 I7；本分支以 PR 对齐 |
+| 计划 I11–I16（M5） | **未开工**：2026-11-11 完成仓内勘察与外部参考比对，规划已写入 `## M5 调车可视化` |
+| `dev` 分支 | 落后本分支 10 个提交，且其 `plan.md` 仍写 I7 未开始 ⇒ 从 `dev` 恢复会重做 I7；本分支以 PR 对齐 |
 
 本机复跑（`colcon` + 标准库脚本，不依赖容器）：
 
@@ -149,6 +212,16 @@ I9（组织规则同步）见 D14/D15；许可证见 D19。
   （不是此前写的 `~/Projects/RoboMaster/foray_simulation`），`origin` 为 SSH
   `git@github.com:ZQU-Foray/foray_simulation.git`；宿主未装 `gh`，PR 需在网页发起。
   `foray_localization/local/staging/` 下的旧副本不再使用。
+- **I14（相机 / 图像链路）是新增对外接口，需先立需求**：`model.sdf` 目前只有
+  `gpu_lidar` + `imu`，`config/bridge.yaml` 只桥 5 条话题。加相机就会多出
+  `/camera/image_raw`、`/camera/camera_info` 这类对外话题，`README.md` 的 A0–A7
+  没有对应条目——按「`README.md` 是唯一需求源」，得先由 `foray_interfaces` 定契约
+  （话题名 / 编码 / `camera_info` 口径），再回 `README.md` 立需求，然后才动 `model.sdf`
+  与 `bridge.yaml`。在此之前 I11–I13 只用现有话题即可完成。
+- **可视化窗口本机开不出来（取证限制）**：宿主没有 `docker` / `rviz2` / `rqt` / `gz`，
+  I11–I13、I16 的「窗口真的开出来、显示项确实有数据」这类回执只能在
+  `foray_sim:humble-fortress` 容器里、把 X11 递进去补；本轮只做到配置文件与
+  `--show-args` 一级的核对。同理 I15 的频率/延迟数据也要在容器内才有意义。
 
 ## 复现命令
 
@@ -165,4 +238,16 @@ python3 scripts/ci/check_style.py && python3 scripts/ci/check_tree_doc.py \
 # 仿真（需要派生镜像；宿主缺 docker / nav2 / ros_gz / point_lio 时只能跳过这两步）
 docker build -t foray_sim:humble-fortress docker/
 ros2 launch foray_simulation_bringup simulation.launch.py headless:=true
+
+# 调车窗口：今天能用的只有 rviz:=true（加载 rviz/sim.rviz 验收最小集）
+ros2 launch foray_simulation_bringup navigation_sim.launch.py gui:=true rviz:=true
+
+# 调车窗口：M5（I11–I16）落地后才存在的入口，下面几条现在跑会报参数/文件不存在
+# ros2 launch foray_simulation_bringup navigation_sim.launch.py rviz:=true rviz_config:=tune.rviz  # I11
+# ros2 launch foray_simulation_bringup navigation_sim.launch.py rqt:=true                          # I13
+# python3 scripts/tune_report.py                                                                   # I15
+# ros2 run foxglove_bridge foxglove_bridge   # I16，浏览器开 https://studio.foxglove.dev 连接
 ```
+
+窗口只能在 `foray_sim:humble-fortress` 容器里开（宿主无 `rviz2` / `rqt` / `gz`），
+需要把 X11 递进容器（`-e DISPLAY -v /tmp/.X11-unix:/tmp/.X11-unix`）。
