@@ -17,6 +17,7 @@ usage() {
   --rviz          同时打开 RViz
   --rviz-config F RViz 视图（rviz/ 下的文件名，默认 sim.rviz；调车用 tune.rviz）
   --tune          调车一键：等价于 --rviz --rviz-config tune.rviz
+  --rqt           同时拉起调车 rqt 面板组（缺哪个面板少哪个，不影响整链）
   --no-nav        只起仿真 + 定位，不起 Nav2
   --nav-delay S   Nav2 延后多少秒启动（默认取 launch 的 25.0）
   --x X           初始位姿 x（默认取 launch 的 6.0）
@@ -30,6 +31,7 @@ USAGE
 gui=false
 rviz=false
 rviz_config=""
+rqt=false
 with_nav=true
 nav_delay=""
 pose_args=()
@@ -40,6 +42,7 @@ while [[ $# -gt 0 ]]; do
         --rviz) rviz=true; shift ;;
         --rviz-config) rviz_config="${2:?--rviz-config 需要一个视图文件名}"; shift 2 ;;
         --tune) rviz=true; rviz_config=tune.rviz; shift ;;
+        --rqt) rqt=true; shift ;;
         --no-nav) with_nav=false; shift ;;
         --nav-delay) nav_delay="${2:?--nav-delay 需要一个秒数}"; shift 2 ;;
         --x) pose_args+=("x:=${2:?--x 需要一个数值}"); shift 2 ;;
@@ -71,8 +74,17 @@ if [[ -n $rviz_config ]]; then
     rviz=true
 fi
 
+# rqt 参数只存在于 navigation_sim.launch.py，退化到 --no-nav 时不要传未知参数
+if [[ $rqt == true && $with_nav == false ]]; then
+    echo "--no-nav 时不带 rqt 面板组（rqt 参数在 navigation_sim 里）" >&2
+    rqt=false
+fi
+
 args=("gui:=$gui" "headless:=$headless" "rviz:=$rviz")
-# 视图名只在显式给出时透传：默认值由 launch 一处维护
+# 视图名与 rqt 只在显式给出时透传：默认值由 launch 一处维护
+if [[ $with_nav == true ]]; then
+    args+=("rqt:=$rqt")
+fi
 if [[ -n $rviz_config ]]; then
     args+=("rviz_config:=$rviz_config")
 fi

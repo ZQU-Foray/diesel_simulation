@@ -142,6 +142,15 @@ def generate_launch_description():
         condition=IfCondition(LaunchConfiguration("start_nav2")),
     )
 
+    # 调车面板组（I13）：脚本自己检查各 rqt 面板在不在，缺哪个少哪个，不影响整链
+    rqt_tune = Node(
+        package="foray_simulation_bringup",
+        executable="tune_rqt.sh",
+        name="tune_rqt",
+        output="screen",
+        condition=IfCondition(LaunchConfiguration("rqt")),
+    )
+
     nav2_stack = TimerAction(
         period=LaunchConfiguration("nav2_delay"),
         actions=[map_server, map_lifecycle, navigation],
@@ -162,6 +171,11 @@ def generate_launch_description():
             DeclareLaunchArgument("x", default_value="6.0"),
             DeclareLaunchArgument("y", default_value="4.0"),
             DeclareLaunchArgument("yaw", default_value="0.0"),
+            DeclareLaunchArgument(
+                "rqt",
+                default_value="false",
+                description="开调车 rqt 面板组（graph / topic / plot / console / tf_tree / image_view）",
+            ),
             DeclareLaunchArgument("start_nav2", default_value="true"),
             # 定位实测：point_lio 4 s 起、初值 6 s 注入、/localization/state 首次 OK 约 8 s；
             # 25 s 留足软件渲染下的余量（accept.py ready 会打印实际 ready_delay_s）
@@ -172,6 +186,7 @@ def generate_launch_description():
             ),
             localization,
             *odom_bridge,
+            rqt_tune,
             nav2_stack,
         ]
     )

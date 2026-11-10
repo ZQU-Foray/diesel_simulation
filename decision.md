@@ -391,3 +391,26 @@ false」三条写成断言。
 没有压在机器人身上、暂停/单步按钮可用。若某面板类名与实际注册名不符，
 `gz sim` 会在终端打印 `Failed to load plugin`，此时改 `gui.config` 的 `filename`
 并同步 `KNOWN_GZ_GUI_PLUGINS`。
+
+## D23 调车 rqt 用启动器按需拉面板，且不写进 `package.xml`
+
+**决定**：新增 `scripts/tune_rqt.sh`（装到 `lib/foray_simulation_bringup`），由
+`navigation_sim.launch.py` 的 `rqt:=true` 以普通 `Node` 拉起；`sim_up.sh` 加 `--rqt`
+（`--no-nav` 时自动收掉，因为 `localization_sim.launch.py` 没有该参数）。
+脚本逐个 `command -v` 检查 `rqt_graph`/`rqt_topic`/`rqt_plot`/`rqt_console`/
+`rqt_tf_tree`/`rqt_image_view`，缺哪个就打印 `ros-<distro>-rqt-*` 包名再继续，
+一个都没有才非零退出；`trap` 统一收摊。**`package.xml` 不声明 rqt 依赖。**
+
+**理由**：
+- 不用 `rqt --perspective-file`：perspective 是 Qt 的二进制布局，手写必然与安装的 Qt
+  版本不符，加载失败时只得到一片空白窗口，比没开更误导。按需拉独立面板则降级自然。
+- 缺面板不整组失败：调控制器时最要紧的是 `rqt_plot` 的「下发 vs 实际速度」，
+  不能因为没装 `rqt_graph` 就全丢。
+- 不写 `package.xml`：rqt 只是可选调试工具，写进 `exec_depend` 会让 CI 镜像与
+  `rosdep` 安装链条变重，而 CI 从不打开任何窗口。代价是容器里要手动装，
+  脚本已经把该执行的命令打出来了。
+- `test/test_tune_rqt.py` 把三条行为锁住：语法、面板清单、缺 rqt 时的非零退出与包名提示；
+  另加 `sim_up.sh --rqt` 的透传与 `--no-nav` 收敛断言。
+
+**未覆盖**：面板真实弹出、`rqt_plot` 三条曲线真的有数据，需在
+`foray_sim:humble-fortress` 容器 + X11 下人工确认。

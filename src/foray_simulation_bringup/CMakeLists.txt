@@ -16,7 +16,7 @@ install(
 install(
     PROGRAMS scripts/make_pcd.py scripts/make_manifest.py scripts/make_nav_map.py
              scripts/set_initial_pose.py scripts/accept.py
-             scripts/sim_up.sh
+             scripts/sim_up.sh scripts/tune_rqt.sh
     DESTINATION lib/${PROJECT_NAME}
 )
 
@@ -50,6 +50,13 @@ if(BUILD_TESTING)
                 --parameters ../foray_rmul_2027_field/maps/rmul_2027/parameters.json
                 --nav-pgm map/nav2/rmul_2027_nav.pgm
                 --nav-yaml map/nav2/rmul_2027_nav.yaml
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+
+    # 调车 rqt 面板组：脚本语法 + 缺包时的行为（宿主没有 rqt 也能跑）
+    add_test(
+        NAME tune_rqt
+        COMMAND python3 test/test_tune_rqt.py
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     )
 

@@ -135,12 +135,14 @@ foray_simulation/
         │   ├── set_initial_pose.py            #   摆位 + 调定位 Relocalize
         │   ├── make_nav_map.py                #   官方栅格 → 导航栅格（清隧道顶投影）
         │   ├── accept.py                      #   A2/A3/A6 运行时验收（ready/a2/a3）
-        │   └── sim_up.sh                      #   一键起整链（默认含 Nav2）
+        │   ├── sim_up.sh                      #   一键起整链（默认含 Nav2；--tune 调车视图）
+        │   └── tune_rqt.sh                    #   调车 rqt 面板组（缺哪个少哪个）
         └── test/
             ├── test_pcd_align.py              #   A5：点云投影 vs 官方地图 IoU
             ├── test_manifest.py               #   A4：清单契约 + 篡改检测
             ├── test_nav_map.py                #   A3：派生图差异有界 + 通道宽度断言
-            └── test_tune_configs.py           #   调车视图话题白名单 + gz GUI 插件名
+            ├── test_tune_configs.py           #   调车视图话题白名单 + gz GUI 插件名
+            └── test_tune_rqt.py               #   调车 rqt 启动器行为（语法 / 缺包 / 透传）
 ```
 
 ## 职责边界

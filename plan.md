@@ -143,6 +143,11 @@ I9（组织规则同步）见 D14/D15；许可证见 D19。
       `/odometry` 速度对照，调控制器先看这张）、`rqt_console`（过滤 `ros_gz_bridge` 噪声）、
       `rqt_tf_tree`、`rqt_image_view`（等 I14）。启动器逐个检查面板是否可用，缺哪个就打印
       对应的 `ros-humble-rqt-*` 包名再继续拉起其余面板（不整组失败），Ctrl-C 统一收摊。
+      - 状态（2026-11-11）：代码完成——`scripts/tune_rqt.sh`（缺面板打印 `ros-humble-rqt-*`
+        包名后继续，一个都没有才非零退出，`trap` 统一收摊）、`navigation_sim.launch.py` 的
+        `rqt:=true`、`sim_up.sh --rqt`、门禁 `test/test_tune_rqt.py`（语法 / 面板清单 /
+        缺包行为 / 透传与 `--no-nav` 收敛）均已落地；`package.xml` 按 D23 不加 rqt 依赖。
+        **面板真实弹出与曲线有数据仍待容器回执**，故不勾选。
       2026-11-11 勘察修正：**不再盲写 `config/rqt/tune.perspective`**——perspective 是 Qt 的
       ini 布局快照、靠 GUI 保存产生，凭空手写极可能开出一片空窗；只有在容器里人工保存的
       perspective 被验证可用后，才可选入库。基础镜像是 `osrf/ros:humble-desktop-full`，
