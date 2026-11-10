@@ -6,9 +6,10 @@
 ## 当前断点（2026-11-11）
 
 **I1–I6、I9 完成（A2 已在仿真里取证通过、仓级门禁已接入），I7 代码与文档完成但
-运行时判定被外部阻塞，I8 / I10 未做；M5 调车可视化（I11–I16）里 I11 已实现
-（`rviz/tune.rviz` + `rviz_config` 参数 + `tune_configs` 门禁），窗口开窗回执待容器补跑，
-I12–I16 未开工。**
+运行时判定被外部阻塞，I8 / I10 未做。M5 调车可视化（I11–I16）里 I11 / I12 / I13 / I15
+已完成代码与门禁（`tune.rviz` + `rviz_config` 参数、Gazebo GUI 四面板、`tune_rqt.sh`
+面板组、`tune_report.py` 健康快照），**开窗与真实频率回执仍待容器补跑**；
+I16 可选未做，I14 阻塞在 `foray_interfaces` 的相机契约。**
 上述工作全部落在分支 `feat/i7-nav-a6`，`origin/dev` 仍停在 `05b6992`，**本分支尚未发起 PR**
 （落后多少提交用 `git rev-list --count origin/dev..HEAD` 现查，不在文档里写死）。
 I6 的三处根因与取证见 `decision.md` D11/D12/D13；D9 的「回调从未被调用」已更正。
@@ -95,7 +96,8 @@ I9（组织规则同步）见 D14/D15；许可证见 D19。
 - [ ] **I8**：跨仓收尾——`foray_ws/.repos` 增 `foray_simulation`，`foray_docs`
       §6.6 加 scope 词表、`repository_structure.md` 补仓列表，`foray_localization/decision.md`
       的 D17 一并提交。
-- [ ] **I11–I16（M5 调车可视化）**：I11 代码与门禁完成（开窗回执待容器），I12–I16 未开工，
+- [ ] **I11–I16（M5 调车可视化）**：I11 / I12 / I13 / I15 代码与门禁完成（开窗与真实频率回执
+        待容器），I16 可选未做、I14 阻塞在相机契约，
       逐项清单见下节
       `## M5 调车可视化`；其中 I14 会新增对外话题，须先由 `foray_interfaces` 定契约。
 
