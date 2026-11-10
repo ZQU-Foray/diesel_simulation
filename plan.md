@@ -3,16 +3,19 @@
 > 状态：`[x]` 已完成并有可追溯回执 · `[~]` 进行中 · `[ ]` 未开始。
 > 任意时刻中断后从这里恢复。
 
-## 当前断点（2026-11-02）
+## 当前断点（2026-11-11）
 
 **I1–I6、I9 完成（A2 已在仿真里取证通过、仓级门禁已接入），I7 代码与文档完成但
-运行时判定被外部阻塞，I8 / I10 未做。** 上述工作全部落在分支 `feat/i7-nav-a6`
-（相对 `origin/dev` 共 8 个提交），本地 `dev` 已快进到 `origin/dev`（`05b6992`）。
+运行时判定被外部阻塞，I8 / I10 未做。** 上述工作全部落在分支 `feat/i7-nav-a6`，
+`origin/dev` 仍停在 `05b6992`（落后本分支 9 个提交），**本分支尚未发起 PR**。
 I6 的三处根因与取证见 `decision.md` D11/D12/D13；D9 的「回调从未被调用」已更正。
 I7（导航装配、派生栅格、验收脚本、`cmd_vel` 桥接修正）见 D16/D17/D18/D20；
 I9（组织规则同步）见 D14/D15；许可证见 D19。
 **A3/A6 的运行时判定被 `foray_localization` 的 GICP 后端阻塞**，
 取证与待办见下方「阻塞与待确认」与 I10。
+
+> **工作方式（2026-11-11 起）**：本仓任何编辑都先开功能分支（`feat/` `fix/` `docs/`），
+> 再以 **PR 合入 `dev`**；不在 `dev` 上直接提交。`main` 只接受来自 `dev` 的稳定版本。
 
 ## M1 场地资产（A0 / A5 的一半）
 
@@ -90,6 +93,31 @@ I9（组织规则同步）见 D14/D15；许可证见 D19。
       §6.6 加 scope 词表、`repository_structure.md` 补仓列表，`foray_localization/decision.md`
       的 D17 一并提交。
 
+## 2026-11-11 完成度审计
+
+审计基线：`README.md` §1 的 A0–A7（唯一需求源）+ 本文件 I1–I10（计划）。`dev`（`05b6992`）
+与本分支各复跑一次，结论如下。
+
+| 层面 | 结论 |
+|---|---|
+| 需求 A0–A7 | **6/8 有回执**：A0/A1/A2/A4/A5/A7 通过；**A3/A6 无 PASS 回执**（I10 未解） |
+| 计划 I1–I10 | **完成 7、进行中 1、未做 2**：I1–I6、I9 完成；I7 代码完成、判定阻塞；I8/I10 未做 |
+| `dev` 分支 | 落后本分支 9 个提交，且其 `plan.md` 仍写 I7 未开始 ⇒ 从 `dev` 恢复会重做 I7；本分支以 PR 对齐 |
+
+本机复跑（`colcon` + 标准库脚本，不依赖容器）：
+
+- `colcon build` 2 包通过；`colcon test` → `dev` 3 tests、本分支 4 tests，均 0 failures；
+- `scripts/ci/{check_style,check_tree_doc,check_layer}.py` 三门全绿（本分支 100 文件 / 31 目录）；
+- `scripts/ci/selftest.py` → 5 条注入全部被拦下，干净副本三门全绿；
+- `test_pcd_align.py` 复算 **IoU 0.9331**（召回 0.9777 / 精确 0.9534）、`test_manifest.py` PASS；
+- `ros2 pkg executables foray_simulation_bringup` → 6 个可执行体（含 `accept.py`、`make_nav_map.py`）。
+
+**本轮复核不了的项**（宿主未装 `docker`；`/opt/ros/humble` 下无 `nav2*` / `ros_gz*` /
+`point_lio`；`pip` 缺失）：
+
+- A0/A1/A2/A3/A6 的运行时回执只能在 `foray_sim:humble-fortress` 容器里重跑；
+- `ruff check` / `black --check` 的回执本轮未能独立复验，仍由 CI 的 `lint-python` 作业守。
+
 ## 阻塞与待确认
 
 - **I6 已解除阻塞**（2026-10-30）：根因是 `ang_bottom` 符号（D11）、`point_lio` 起步撞上
@@ -112,18 +140,29 @@ I9（组织规则同步）见 D14/D15；许可证见 D19。
   结论：**这不是本仓能修的问题**（本仓只装配），需 `foray_localization` 侧把 GICP 的
   质量口径与 0.25 m 体素地图对齐、或恢复可用后端；修好后在本仓执行
   `accept.py ready --deadline 300` + `accept.py a3 --x 2.0 --y 7.4` 即可补上 A3/A6 回执。
-- **仓已迁至 `~/Projects/RoboMaster/foray_simulation`**（2026-10-29 起为日常开发副本，
-  `remote` 用 https + gh CLI 凭据；`foray_localization/local/staging/` 下的旧副本不再使用）。
+- **A1 的 IMU 口径被改动且无留痕（待确认）**：本分支 `README.md` §1 把 A1 里
+  「`/livox/imu` 200 Hz 生效」改成「配置 `update_rate: 200`，实测随 RTF 缩放（软件渲染约
+  156 Hz）」。`README.md` 是唯一需求源，改口径属需求变更，但 `decision.md` 没有对应条目、
+  仓内也找不到 156 Hz 的实测回执，本机（无仿真环境）无法复核。处理方式二选一：
+  补一条 decision 条目 + 容器内 `ros2 topic hz /livox/imu` 回执，或恢复原文措辞。
+- **开发副本路径（2026-11-11 更正）**：日常开发副本是 **`~/Projects/foray_simulation`**
+  （不是此前写的 `~/Projects/RoboMaster/foray_simulation`），`origin` 为 SSH
+  `git@github.com:ZQU-Foray/foray_simulation.git`；宿主未装 `gh`，PR 需在网页发起。
+  `foray_localization/local/staging/` 下的旧副本不再使用。
 
 ## 复现命令
 
 ```bash
-# 单元级（不需要仿真环境）
+# 单元级（不需要仿真环境，宿主即可跑）
 colcon build --packages-select foray_rmul_2027_field foray_simulation_bringup
 colcon test  --packages-select foray_rmul_2027_field foray_simulation_bringup
 colcon test-result --all      # 期望 0 errors 0 failures
 
-# 仿真（需要派生镜像）
+# 仓级门禁（纯标准库）
+python3 scripts/ci/check_style.py && python3 scripts/ci/check_tree_doc.py \
+    && python3 scripts/ci/check_layer.py && python3 scripts/ci/selftest.py
+
+# 仿真（需要派生镜像；宿主缺 docker / nav2 / ros_gz / point_lio 时只能跳过这两步）
 docker build -t foray_sim:humble-fortress docker/
 ros2 launch foray_simulation_bringup simulation.launch.py headless:=true
 ```
