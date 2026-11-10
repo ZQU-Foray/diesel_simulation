@@ -111,7 +111,7 @@ foray_simulation/
         │   └── navigation_sim.launch.py       #   定位 + odom→base 补全 + Nav2（A3/A6）
         ├── config/
         │   ├── bridge.yaml                    #   ros_gz_bridge 话题映射
-        │   ├── gui.config                     #   gz GUI 布局
+        │   ├── gui.config                     #   gz GUI 布局（3D 视图 + 调车四面板）
         │   ├── point_lio_sim.yaml             #   point_lio 仿真参数（上游默认值）
         │   └── nav2_params_sim.yaml           #   Nav2 仿真参数（按 0.8 m 通道重标）
         ├── rviz/

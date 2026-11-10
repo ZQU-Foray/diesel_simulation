@@ -62,6 +62,25 @@ KNOWN_GZ_GUI_PLUGINS = {
     "TopicViewer",
 }
 
+# I12：调车时必须有这几个面板（WorldControl 单步定帧、WorldStats 看 RTF、
+# EntityTree + ComponentInspector 查模型与传感器参数）
+REQUIRED_GZ_GUI_PLUGINS = {
+    "MinimalScene",
+    "GzSceneManager",
+    "WorldControl",
+    "WorldStats",
+    "EntityTree",
+    "ComponentInspector",
+}
+
+# 这几个是浮在 3D 视图上的窗口，必须给出 x/y，否则会正好压在场景中心
+POSITIONED_GZ_GUI_PLUGINS = {
+    "WorldControl",
+    "WorldStats",
+    "EntityTree",
+    "ComponentInspector",
+}
+
 REQUIRED_TUNE_DISPLAYS = {
     ("rviz_default_plugins/RobotModel", "/robot_description"),
     ("rviz_default_plugins/TF", None),
@@ -178,8 +197,20 @@ def check_gui_config():
             f"gui.config 用了白名单外的插件（类名写错时 gz 会静默丢掉面板）：{sorted(unknown)}；"
             f"容器内用 `ign gui -l` 核对后把确认可用的名字加进 KNOWN_GZ_GUI_PLUGINS"
         )
-    if {"MinimalScene", "GzSceneManager"} - plugins:
-        raise CheckError(f"gui.config 丢了 3D 视图插件，实际 {sorted(plugins)}")
+    missing = REQUIRED_GZ_GUI_PLUGINS - plugins
+    if missing:
+        raise CheckError(f"gui.config 缺少调车面板：{sorted(missing)}")
+
+    for plugin in root.iter("plugin"):
+        name = plugin.get("filename")
+        keys = {prop.get("key") for prop in plugin.iter("property")}
+        if name in POSITIONED_GZ_GUI_PLUGINS and {"x", "y"} - keys:
+            raise CheckError(f"gui.config 的 {name} 面板没给 x/y，会压在 3D 视图正中")
+        if name == "WorldControl":
+            # 写错成 true 的话世界一启动就暂停，所有话题都是空的
+            node = plugin.find("start_paused")
+            if node is None or (node.text or "").strip() != "false":
+                raise CheckError("gui.config 里 WorldControl 的 start_paused 必须显式写 false")
 
 
 CHECKS = (

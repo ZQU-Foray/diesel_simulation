@@ -369,3 +369,25 @@ D15 里「A2 判据门脚本没入库」的欠账一并还清。
 `Odometry` display 是否支持 `Keep`（累积轨迹）、`/map` 是否被
 `foray_map_server` 与 nav2 `map_server` 双发布，都要在
 `foray_sim:humble-fortress` 容器里补证。
+
+## D22 gz GUI 面板用绝对 x/y 摆放，`WorldControl` 必须显式 `start_paused=false`
+
+**决定**：`config/gui.config` 在原有 `MinimalScene` + `GzSceneManager` 之后追加
+`WorldControl`、`WorldStats`、`EntityTree`、`ComponentInspector` 四个面板，每个用
+`<ignition-gui><property key="x"/"y">` 给绝对像素位置（左上两块、右侧两块），
+`WorldControl` 显式写 `<start_paused>false</start_paused>`，
+`test/test_tune_configs.py` 把「必需面板集合」「浮窗必须有 x/y」「start_paused 必须是
+false」三条写成断言。
+
+**理由**：
+- 面板不给 x/y 时全部叠在窗口左上（3D 视图正中），调车时等于没开。
+- `start_paused` 若写成 `true`，世界一启动就停在暂停态：`/clock` 不走、`/livox/lidar`
+  一帧不推，A2/A3 会表现为「全链没数据」，而 GUI 侧看起来完全正常。
+- `WorldControl` 的 `<service>` 与 `WorldStats` 的 `<topic>` 故意留空：不写才按当前
+  世界名推导（`/world/rmul_2027/...`），写死会在换世界后静默失效——和 D20 同一类坑。
+
+**待补回执**：宿主无 `gz`，插件注册名尚未在容器内用 `ign gui -l` 逐条核对；布局也只
+按经验值摆放（1400 px 宽窗口）。容器里首次开 GUI 时需确认：四个面板都出现、
+没有压在机器人身上、暂停/单步按钮可用。若某面板类名与实际注册名不符，
+`gz sim` 会在终端打印 `Failed to load plugin`，此时改 `gui.config` 的 `filename`
+并同步 `KNOWN_GZ_GUI_PLUGINS`。

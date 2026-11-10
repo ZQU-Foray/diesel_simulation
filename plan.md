@@ -133,6 +133,11 @@ I9（组织规则同步）见 D14/D15；许可证见 D19。
       `simulation.launch.py` 用 `--gui-config` 传给 `gz sim`，改一份即对全链生效。
       插件类名以容器内 `ign gui -l` 的真实输出为准（候选名单按上游 `ign-gui6` 与
       `ign-gazebo6` 的插件目录核对得出），类名写错时 gz 会静默丢掉该面板、窗口里什么都不报。
+      - 状态（2026-11-11）：代码完成——四个面板已写进 `config/gui.config`，各自带绝对
+        `x/y`；`WorldControl` 显式 `start_paused=false`（否则世界启动即暂停，全链无数据）；
+        `test/test_tune_configs.py` 断言「必需面板集合 / 浮窗必须有 x/y / start_paused 为
+        false」，并做过注入 `start_paused=true` 的反向验证。**面板是否真的出现、布局是否
+        压到机器人、`ign gui -l` 的名字是否与 `filename` 一致仍待容器回执**，故不勾选。
 - [ ] **I13 rqt 面板组**（`rqt:=true` + `scripts/tune_rqt.sh` 启动器）：一次开出
       `rqt_graph`（谁连谁）、`rqt_topic`（关键话题频率）、`rqt_plot`（`/cmd_vel` 与
       `/odometry` 速度对照，调控制器先看这张）、`rqt_console`（过滤 `ros_gz_bridge` 噪声）、
