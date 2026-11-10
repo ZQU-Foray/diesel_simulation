@@ -161,6 +161,12 @@ I9（组织规则同步）见 D14/D15；许可证见 D19。
       关键话题实测频率与帧间隔、`/localization/state` 的健康字段（`accept.py` 已订阅该契约）、
       TF 链完整性、`/cmd_vel` 指令与 `/sim/pose_info` 真值对照；默认人读表格，`--json` 给机器。
       不依赖仿真也能跑（空数据路径自检），并纳入 `colcon test` 回归。
+      - 状态（2026-11-11）：代码完成——统一窗口采样六路话题 + TF 链 + `/cmd_vel` vs 真值，
+        `--json` 顶层键固定，顶层不 import rclpy；门禁 `test/test_tune_report.py`
+        （10 Hz 合成 / 2.0 s 边界判 stale / 空序列不补零 / JSON 契约）已接入 `colcon test`。
+        修正一处早期误判：`/sim/pose_info` 是 `tf2_msgs/TFMessage`、
+        `LocalizationState` 用 `state` 常量而非 `status` 字段。
+        **真实频率数值与真值偏差量级仍待容器回执**，故不勾选。
 - [ ] **I16 浏览器路线（可选，无 X11 时的替代）**：`foxglove_bridge`（Humble 有
       `ros-humble-foxglove-bridge`）→ Foxglove Studio 网页看 3D / 曲线 / 图像，还能顺手录
       bag 复看。与 `use_sim_time` 的兼容性、网页端 `PointCloud2` 带宽都需实测；真要用就在

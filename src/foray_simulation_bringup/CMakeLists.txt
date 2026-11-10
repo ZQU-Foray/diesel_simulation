@@ -16,7 +16,7 @@ install(
 install(
     PROGRAMS scripts/make_pcd.py scripts/make_manifest.py scripts/make_nav_map.py
              scripts/set_initial_pose.py scripts/accept.py
-             scripts/sim_up.sh scripts/tune_rqt.sh
+             scripts/sim_up.sh scripts/tune_rqt.sh scripts/tune_report.py
     DESTINATION lib/${PROJECT_NAME}
 )
 
@@ -57,6 +57,13 @@ if(BUILD_TESTING)
     add_test(
         NAME tune_rqt
         COMMAND python3 test/test_tune_rqt.py
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+
+    # 调车健康快照：频率/失联判定与 --json 契约（纯函数，宿主即可跑）
+    add_test(
+        NAME tune_report
+        COMMAND python3 test/test_tune_report.py
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     )
 

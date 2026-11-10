@@ -414,3 +414,29 @@ false」三条写成断言。
 
 **未覆盖**：面板真实弹出、`rqt_plot` 三条曲线真的有数据，需在
 `foray_sim:humble-fortress` 容器 + X11 下人工确认。
+
+## D24 调车快照用统一采样窗口，缺数据标 `missing` 而不是 0 Hz
+
+**决定**：新增 `scripts/tune_report.py`（装到 `lib/foray_simulation_bringup`），用一个
+`--window` 窗口同时采样 `/livox/lidar`、`/cloud_registered`、`/aft_mapped_to_init`、
+`/odometry`、`/localization/state`、`/cmd_vel`、`/sim/pose_info`，并按
+`map→odom→base_footprint→front_mid360` 逐段查 TF，最后输出人读表格或 `--json`
+（顶层键 `generated_at`/`window_s`/`topics`/`tf`/`localization`/`cmd_vs_truth`）。
+失效阈值直接复用 D13 的 `ODOM_TIMEOUT_SEC=2.0`、`LIDAR_TIMEOUT_SEC=2.5`、
+`LOST_TIMEOUT_SEC=5.0`；顶层不 import rclpy，判断逻辑全在纯函数里。
+
+**理由**：
+- 调车时「车不动」至少有四种成因（速度没进物理引擎、点云断流、TF 断链、定位 LOST），
+  逐条 `ros2 topic hz` 采样窗口各不相同，结论对不上；统一窗口才能互相印证。
+- 取不到就标 `missing`、`hz` 留 `None`：把「没数据」显示成 `0 Hz` 会让人误判成
+  「发布者存在但极慢」，而实际是根本没发布者。
+- 顶层不 import rclpy，宿主就能跑 `test/test_tune_report.py`（10 Hz 合成序列、
+  2.0 s 边界判 stale、空序列判 missing、`--json` 键契约），不必等容器。
+
+**已踩过的坑（写进代码注释）**：`/sim/pose_info` 桥过来是 `tf2_msgs/TFMessage`
+（gz 的 `pose/info`），不是位姿消息本体；要按 `child_frame_id` 取
+`foray_sim_robot/chassis`，退回模型根位姿。`LocalizationState` 用
+`state` 常量 + `pose_valid`，没有 `status` 字段——初版按 `status` 写是错的。
+
+**未覆盖**：真实话题上的频率数值、TF 查询在 `use_sim_time` 下的表现、
+`/cmd_vel` 与真值位移的偏差量级，都要在容器里跑一次才有回执。
