@@ -103,7 +103,7 @@ I9（组织规则同步）见 D14/D15；许可证见 D19。
 > 必须先由 `foray_interfaces` 定契约、再回 `README.md` 立需求。
 
 现状（2026-11-11 勘察）：能给的窗口只有两个——Gazebo GUI（`config/gui.config` 里只有
-`MinimalScene` + `SceneManager`，纯 3D 场景）和 RViz2（`rviz/sim.rviz` 只有 `TF` /
+`MinimalScene` + `GzSceneManager`，纯 3D 场景）和 RViz2（`rviz/sim.rviz` 只有 `TF` /
 `/livox/lidar` / `/map`，俯视 `TopDownOrtho`）。`rqt` 在 launch、`package.xml`、
 `docker/Dockerfile` 里都没有出现；`model.sdf` 只有 `gpu_lidar` + `imu`，没有相机。
 
@@ -114,18 +114,26 @@ I9（组织规则同步）见 D14/D15；许可证见 D19。
       - `/cloud_registered`（`loam_interface` 输出）与 `/lidar_odometry`；
       - `/map` 与派生导航栅格 `rmul_2027_nav` 叠看（D16 的清隧道要在图上可验）；
       - `local_costmap/costmap`、`global_costmap/costmap`、`/local_costmap/published_footprint`；
-      - `/plan`（全局）与 `/local_plan`（局部），以及 `/odometry` 累积成的轨迹；
+      - `/plan`（全局）与 `/local_plan`（局部），以及 `/odometry`（先只放朝向箭头）；
+      - 轨迹：RViz2 的 `Odometry` display 能否保留历史位姿（`Keep`）需在容器里实测，
+        能才开历史轨迹；否则轨迹交给 I15 的文本报告，不承诺 RViz 里的累积轨迹；
       - 工具：`SetInitialPose`（`/initialpose`）、`SetGoal`（`/goal_pose`）、
         `PublishPoint`（`/clicked_point`）、`Measure`（量隧道净空）；
       - 两套视图预设：`TopDownOrtho`（对图、发目标）与 `Orbit`（看隧道顶与场地高差）。
 - [ ] **I12 Gazebo GUI 补面板**（`config/gui.config`）：现在只有 `MinimalScene` +
-      `SceneManager`。补 `WorldControl`（暂停/单步，调车时定住一帧）、`EntityTree`、
-      `ComponentInspector`、`WorldStats`；该文件由 `simulation.launch.py` 用 `--gui-config`
-      传给 `gz sim`，改一份即对全链生效。
-- [ ] **I13 rqt 面板组**（`rqt:=true` + `config/rqt/tune.perspective`）：一次开出
+      `GzSceneManager`。补 `WorldControl`（暂停/单步，调车时定住一帧）、`EntityTree`、
+      `ComponentInspector`、`WorldStats`（可选再补 `TransformControl`、`ViewAngle`）；该文件由
+      `simulation.launch.py` 用 `--gui-config` 传给 `gz sim`，改一份即对全链生效。
+      插件类名以容器内 `ign gui -l` 的真实输出为准（候选名单按上游 `ign-gui6` 与
+      `ign-gazebo6` 的插件目录核对得出），类名写错时 gz 会静默丢掉该面板、窗口里什么都不报。
+- [ ] **I13 rqt 面板组**（`rqt:=true` + `scripts/tune_rqt.sh` 启动器）：一次开出
       `rqt_graph`（谁连谁）、`rqt_topic`（关键话题频率）、`rqt_plot`（`/cmd_vel` 与
       `/odometry` 速度对照，调控制器先看这张）、`rqt_console`（过滤 `ros_gz_bridge` 噪声）、
-      `rqt_tf_tree`、`rqt_image_view`（等 I14）。基础镜像是 `osrf/ros:humble-desktop-full`，
+      `rqt_tf_tree`、`rqt_image_view`（等 I14）。启动器逐个检查面板是否可用，缺哪个就打印
+      对应的 `ros-humble-rqt-*` 包名再继续拉起其余面板（不整组失败），Ctrl-C 统一收摊。
+      2026-11-11 勘察修正：**不再盲写 `config/rqt/tune.perspective`**——perspective 是 Qt 的
+      ini 布局快照、靠 GUI 保存产生，凭空手写极可能开出一片空窗；只有在容器里人工保存的
+      perspective 被验证可用后，才可选入库。基础镜像是 `osrf/ros:humble-desktop-full`，
       rqt 大概率自带；缺则把 `ros-humble-rqt*` 补进 `docker/Dockerfile` 并在回执写清。
 - [ ] **I14 相机 / 图像链路（接口决策点，不阻塞 I11–I13）**：要在窗口里看点云以外的画面，
       需 `model.sdf` 加 `camera` 传感器、`bridge.yaml` 加 `/camera/image_raw` 桥、RViz 加
