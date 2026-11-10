@@ -368,7 +368,8 @@ def main(argv=None):
         print(json.dumps(report, indent=2, ensure_ascii=False))
     else:
         print(format_table(report))
-    return 1 if overall_ok(report) else 0
+    # 退出码按 Unix 习惯：0 = 全部正常，1 = 有异常项（便于 `tune_report.py || 排查`）
+    return 0 if overall_ok(report) else 1
 
 
 if __name__ == "__main__":
