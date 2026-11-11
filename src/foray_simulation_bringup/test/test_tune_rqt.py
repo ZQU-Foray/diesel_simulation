@@ -59,7 +59,9 @@ def check_syntax():
 def check_dry_run():
     result = run(["bash", str(SCRIPT), "--dry-run"])
     if result.returncode != 0:
-        raise CheckError(f"--dry-run 应始终返回 0，实际 {result.returncode}：{result.stderr.strip()}")
+        raise CheckError(
+            f"--dry-run 应始终返回 0，实际 {result.returncode}：{result.stderr.strip()}"
+        )
     panel_names = set()
     for line in result.stdout.splitlines():
         key, _, value = line.partition("=")
@@ -70,7 +72,9 @@ def check_dry_run():
             raise CheckError(f"--dry-run 行格式不对：{line!r}")
         panel_names.add(name.strip())
     if panel_names != EXPECTED_PANELS:
-        raise CheckError(f"面板清单被改动了：期望 {sorted(EXPECTED_PANELS)}，实际 {sorted(panel_names)}")
+        raise CheckError(
+            f"面板清单被改动了：期望 {sorted(EXPECTED_PANELS)}，实际 {sorted(panel_names)}"
+        )
 
 
 def check_missing_behaviour():
@@ -78,11 +82,15 @@ def check_missing_behaviour():
     if result.returncode == 0:
         raise CheckError("一个 rqt 面板都没有时应当非零退出，实际返回 0")
     if "一个 rqt 面板都没找到" not in result.stderr:
-        raise CheckError(f"缺少「全都没有」的明确提示，实际 stderr：{result.stderr.strip()!r}")
+        raise CheckError(
+            f"缺少「全都没有」的明确提示，实际 stderr：{result.stderr.strip()!r}"
+        )
     # 缺包提示要能直接拿去 apt install
     for pkg in ("rqt-graph", "rqt-plot", "rqt-image-view"):
         if f"ros-humble-{pkg}" not in result.stderr:
-            raise CheckError(f"缺包提示里没有 ros-humble-{pkg}：{result.stderr.strip()!r}")
+            raise CheckError(
+                f"缺包提示里没有 ros-humble-{pkg}：{result.stderr.strip()!r}"
+            )
 
 
 def check_launch_wiring():

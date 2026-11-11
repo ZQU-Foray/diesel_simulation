@@ -175,7 +175,9 @@ def check_tune_rviz():
     saved = (view.get("Views") or {}).get("Saved") or []
     saved_names = {entry.get("Name") for entry in saved if isinstance(entry, dict)}
     if {"TopDownOrtho", "Orbit"} - saved_names:
-        raise CheckError(f"tune.rviz 需要 TopDownOrtho 与 Orbit 两套视图，实际 {sorted(saved_names)}")
+        raise CheckError(
+            f"tune.rviz 需要 TopDownOrtho 与 Orbit 两套视图，实际 {sorted(saved_names)}"
+        )
 
 
 def check_gui_config():
@@ -210,7 +212,9 @@ def check_gui_config():
             # 写错成 true 的话世界一启动就暂停，所有话题都是空的
             node = plugin.find("start_paused")
             if node is None or (node.text or "").strip() != "false":
-                raise CheckError("gui.config 里 WorldControl 的 start_paused 必须显式写 false")
+                raise CheckError(
+                    "gui.config 里 WorldControl 的 start_paused 必须显式写 false"
+                )
 
 
 CHECKS = (

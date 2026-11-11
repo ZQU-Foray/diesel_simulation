@@ -208,7 +208,9 @@ def format_table(report):
         gap = "-" if item["max_gap_s"] is None else f"{item['max_gap_s']:.3f}"
         lines.append(f"{name:<24}{item['count']:>6}{hz:>10}{gap:>12}  {item['status']}")
     tf = report["tf"]
-    lines.append(f"TF 链 {'完整' if tf.get('chain_ok') else '断裂'}：{tf.get('detail', '')}")
+    lines.append(
+        f"TF 链 {'完整' if tf.get('chain_ok') else '断裂'}：{tf.get('detail', '')}"
+    )
     loc = report["localization"]
     age = "-" if loc.get("age_s") is None else f"{loc['age_s']:.1f}s"
     lines.append(

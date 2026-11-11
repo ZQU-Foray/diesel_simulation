@@ -57,7 +57,9 @@ def check_stale_boundary(module):
     summary = module.summarize_hz([0.0, 2.0])
     status = module.topic_status(summary, module.ODOM_TIMEOUT_SEC)
     if status != "stale":
-        raise CheckError(f"恰 {module.ODOM_TIMEOUT_SEC} s 的间隔应判 stale，实际 {status}")
+        raise CheckError(
+            f"恰 {module.ODOM_TIMEOUT_SEC} s 的间隔应判 stale，实际 {status}"
+        )
 
 
 def check_missing(module):
@@ -77,16 +79,22 @@ def check_json_contract(module):
         topics=topics,
         tf={"chain_ok": True, "detail": "map->odom"},
         localization={"state": "OK", "pose_valid": True, "age_s": 0.1},
-        cmd_vs_truth=module.summarize_cmd_vs_truth(0.5, [(0.0, 6.0, 4.0), (1.0, 6.5, 4.0)]),
+        cmd_vs_truth=module.summarize_cmd_vs_truth(
+            0.5, [(0.0, 6.0, 4.0), (1.0, 6.5, 4.0)]
+        ),
         window_s=1.0,
     )
     keys = set(json.loads(json.dumps(report)))
     if keys != EXPECTED_JSON_KEYS:
-        raise CheckError(f"--json 顶层键被改动了：期望 {sorted(EXPECTED_JSON_KEYS)}，实际 {sorted(keys)}")
+        raise CheckError(
+            f"--json 顶层键被改动了：期望 {sorted(EXPECTED_JSON_KEYS)}，实际 {sorted(keys)}"
+        )
     if report["cmd_vs_truth"]["truth_speed_mps"] is None:
         raise CheckError("真值位移 0.5 m/1 s 应算出 0.5 m/s，实际 None")
     if abs(report["cmd_vs_truth"]["truth_speed_mps"] - 0.5) > 1e-6:
-        raise CheckError(f"真值速度应为 0.5 m/s，实际 {report['cmd_vs_truth']['truth_speed_mps']}")
+        raise CheckError(
+            f"真值速度应为 0.5 m/s，实际 {report['cmd_vs_truth']['truth_speed_mps']}"
+        )
     if module.overall_ok(report):
         raise CheckError(f"全部正常时不该报红，实际 {module.overall_ok(report)}")
 
