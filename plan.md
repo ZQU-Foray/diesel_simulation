@@ -10,13 +10,17 @@
 已完成代码与门禁（`tune.rviz` + `rviz_config` 参数、Gazebo GUI 四面板、`tune_rqt.sh`
 面板组、`tune_report.py` 健康快照），**开窗与真实频率回执仍待容器补跑**；
 I16 可选未做，I14 阻塞在 `foray_interfaces` 的相机契约。**
-上述工作全部落在分支 `feat/i7-nav-a6`，`origin/dev` 仍停在 `05b6992`；**PR #3
-（`feat/i7-nav-a6` → `dev`）已开**，base 已按 AGENTS.md 纠正为 `dev`（原本直指 `main`），
-CI 八项全绿、`MERGEABLE/CLEAN`，等评审；`dev` 与本分支的提交差用
-`git rev-list --count origin/dev..HEAD` 现查，不在文档里写死。
+上述工作全部落在 `feat/i7-nav-a6`，并已**合并进 `dev`**：**PR #3 已 MERGED**
+（合并提交 `99a07ae`，CI 八项全绿、`MERGEABLE/CLEAN`，base 按 AGENTS.md 为 `dev`，
+原本直指 `main` 已纠正）。
+`dev` 合并后做过一次 **clean rebuild 回执**（`rm -rf build install log` 后重来）：
+`colcon build` 2 包通过、`colcon test-result --all` → 7 tests 0 failures、
+`check_style` / `check_tree_doc`（106 文件、31 目录）/ `check_layer` 三门全绿、
+`selftest.py` 5 条注入全部被拦下。
 同批的 PR #4（`fix/i6-pointlio-localization` → `main`）已关闭：其提交 `19d3d0d` 早已随 PR #1
 合入 `dev`，与 `dev` 零差异，属重复 PR。
-`gh` 已登录（classic `repo` scope，token 存 keyring），可直接查 PR / CI / 改 base。
+`gh` 已登录（classic `repo` scope，token 存 keyring），可直接查 PR / CI / 合并。
+后续改动一律从 `dev` 切新分支，不再往 `feat/i7-nav-a6` 上叠。
 I6 的三处根因与取证见 `decision.md` D11/D12/D13；D9 的「回调从未被调用」已更正。
 I7（导航装配、派生栅格、验收脚本、`cmd_vel` 桥接修正）见 D16/D17/D18/D20；
 I9（组织规则同步）见 D14/D15；许可证见 D19。
