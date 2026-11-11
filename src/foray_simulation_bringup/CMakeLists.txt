@@ -73,6 +73,13 @@ if(BUILD_TESTING)
         COMMAND python3 test/test_tune_configs.py
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     )
+
+    # L1：仿真链必须发 `base_footprint -> body`（point_lio 硬编码 body，缺这条定位吃不到帧）
+    add_test(
+        NAME localization_sim_tf
+        COMMAND python3 test/test_localization_sim_launch.py
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    )
 endif()
 
 ament_package()

@@ -440,3 +440,33 @@ false」三条写成断言。
 
 **未覆盖**：真实话题上的频率数值、TF 查询在 `use_sim_time` 下的表现、
 `/cmd_vel` 与真值位移的偏差量级，都要在容器里跑一次才有回执。
+
+## D25 仿真链补 `base_footprint → body` 静态 TF，父方向不可反
+
+**决定**：`launch/localization_sim.launch.py` 增一条 `body_static_tf`
+（`tf2_ros/static_transform_publisher`：父 `base_footprint`、子 `body`、六个分量全 `0.0`），
+并新增 `test/test_localization_sim_launch.py`（ctest 名 `localization_sim_tf`）做结构性断言：
+父帧必须是 `base_footprint`、子帧必须是 `body`、`body_tf` 必须出现在 `LaunchDescription` 里、
+且没有第二条静态 TF 以 `body` 为父。
+
+**理由**：
+- `point_lio` 把机体帧硬编码成 `body`（`laserMapping.cpp:228` 点云 header、
+  `:270` odom 的 `child_frame_id`），而它**从不发布 `body` 的 TF**——它广播的那条在
+  `:280-292`（`publish.tf_send_en` 默认 `true`），是 `camera_init → aft_mapped`。
+  定位节点只在 TF 查得到 `body → base_footprint` 时才收点云，缺这条就一帧不吃、
+  `publish_state()` 四支成因全不命中，状态冻在 `INITIALIZING`（实测 `ready=FAIL`、
+  每 2 s 一条 `TF body->base_footprint 失败`）。
+- 方向只能是 `base_footprint → body`：`base_footprint` 的父已经是上游里程计（D17），
+  再给它挂一个父会把 TF 树拆成两棵互不相连的树（tf2 单亲规则），实测日志
+  `Could not find a connection between 'base_footprint' and 'body'`；改成这个方向后
+  `ready=PASS`、准静态探针 1218/1218 帧 `state=OK`。
+- 六个分量取 `0.0` 是实测口径，不是几何推导：`body` 是 `point_lio` 自己的机体原点，
+  与 `base_footprint` 的偏差会同时进里程计与雷达外参。实车若量出固定偏移，只改这一条参数。
+- 断言用静态 AST、不 `import` ROS：`colcon test` 不该为一条帧契约拉起 gazebo；
+  负向自检已确认它拦得住——把方向改成 `body → base_footprint` 时报出两条问题
+  （父帧、子帧各一条）。
+
+**未覆盖**：实车链同样缺这一层（`point_lio` 两个仓都不发 `body` TF），实车 launch 要单独落实；
+本仓只有仿真 launch。另 `camera_init → aft_mapped` 是一对孤立的两节点树，当前没有订阅者
+跨树查询，所以留它不做改动。
+
