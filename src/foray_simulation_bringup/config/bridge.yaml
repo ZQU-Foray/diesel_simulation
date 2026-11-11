@@ -19,7 +19,11 @@
   direction: gz2ros
 
 # Nav2 速度指令 → 车体平面速度控制
-- gz_topic: /foray_sim_robot/cmd_vel
+# gz 侧话题必须带 `/model/` 前缀：VelocityControl 在模型命名空间下订阅，启动日志实测为
+# 「VelocityControl subscribing to twist messages on [/model/foray_sim_robot/cmd_vel]」。
+# 写成 `/foray_sim_robot/cmd_vel` 时桥接仍会建立、日志也不报错，但仿真车永远不动——
+# 只靠 `ign topic -l` 看不出来的静默错接（decision.md D20）。
+- gz_topic: /model/foray_sim_robot/cmd_vel
   ros_topic: /cmd_vel
   ros_type: geometry_msgs/msg/Twist
   gz_type: ignition.msgs.Twist

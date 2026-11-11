@@ -20,6 +20,7 @@ from launch.actions import (
     AppendEnvironmentVariable,
     DeclareLaunchArgument,
     IncludeLaunchDescription,
+    OpaqueFunction,
     SetEnvironmentVariable,
 )
 from launch.conditions import IfCondition
@@ -59,6 +60,45 @@ def gz_bridge_arguments(share_dir):
     return arguments, remappings
 
 
+def resolve_rviz_config(share_dir, value):
+    """把 `rviz_config` 解析成 RViz 能直接加载的绝对路径。
+
+    允许两种写法：`share/rviz/` 下的文件名（`sim.rviz` / `tune.rviz`），或绝对路径
+    （临时改视图时不必往包里塞文件）。找不到就抛错并列出现有候选——RViz 用不存在的
+    配置启动时只会开一片空窗，那比启动失败更难排查。
+    """
+    path = value if os.path.isabs(value) else os.path.join(share_dir, "rviz", value)
+    if not os.path.isfile(path):
+        rviz_dir = os.path.join(share_dir, "rviz")
+        available = sorted(
+            name
+            for name in os.listdir(rviz_dir)
+            if name.endswith(".rviz") and os.path.isfile(os.path.join(rviz_dir, name))
+        )
+        raise RuntimeError(
+            f"rviz_config 指向的配置不存在：{path}；可用配置：{', '.join(available)}"
+        )
+    return path
+
+
+def _rviz_node(context, share_dir):
+    """按 `rviz` / `rviz_config` 参数决定是否起 RViz 以及加载哪份视图。"""
+    if LaunchConfiguration("rviz").perform(context) != "true":
+        return []
+    config_path = resolve_rviz_config(
+        share_dir, LaunchConfiguration("rviz_config").perform(context)
+    )
+    return [
+        Node(
+            package="rviz2",
+            executable="rviz2",
+            arguments=["-d", config_path],
+            parameters=[{"use_sim_time": True}],
+            output="screen",
+        )
+    ]
+
+
 def generate_launch_description():
     field_share = get_package_share_directory("foray_rmul_2027_field")
     bringup_share = get_package_share_directory("foray_simulation_bringup")
@@ -68,7 +108,6 @@ def generate_launch_description():
 
     gui = LaunchConfiguration("gui")
     headless = LaunchConfiguration("headless")
-    rviz = LaunchConfiguration("rviz")
     robot_x = LaunchConfiguration("x")
     robot_y = LaunchConfiguration("y")
     robot_yaw = LaunchConfiguration("yaw")
@@ -145,14 +184,7 @@ def generate_launch_description():
         output="screen",
     )
 
-    rviz_node = Node(
-        package="rviz2",
-        executable="rviz2",
-        arguments=["-d", os.path.join(bringup_share, "rviz", "sim.rviz")],
-        parameters=[{"use_sim_time": True}],
-        condition=IfCondition(rviz),
-        output="screen",
-    )
+    rviz_node = OpaqueFunction(function=_rviz_node, kwargs={"share_dir": bringup_share})
 
     return LaunchDescription(
         [
@@ -165,6 +197,14 @@ def generate_launch_description():
                 description="无界面跑物理与传感器（服务器默认）",
             ),
             DeclareLaunchArgument("rviz", default_value="false", description="开 RViz"),
+            DeclareLaunchArgument(
+                "rviz_config",
+                default_value="sim.rviz",
+                description=(
+                    "rviz/ 下的视图文件名（sim.rviz 验收最小集 / tune.rviz 调车全量视图），"
+                    "或任意绝对路径；文件不存在时启动即报错并列出候选"
+                ),
+            ),
             DeclareLaunchArgument(
                 "x", default_value="0.0", description="初始 x（场地坐标）"
             ),

@@ -6,3 +6,10 @@
 # 没有需要打包的 Python 分发包，故只配置检查器，不配置 build-system。
 [tool.ruff]
 target-version = "py310"
+
+# black 的默认 line-length 是 88，与 ruff 默认一致；这里显式写出来是为了让
+# 「为什么 88」在仓内可查：本仓最长的一行是 launch 里的参数表，88 列下可读性仍好，
+# 再放宽会与上游 ROS 2 包的排版习惯脱节。
+[tool.black]
+line-length = 88
+target-version = ["py310"]

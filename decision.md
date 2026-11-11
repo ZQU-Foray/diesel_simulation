@@ -251,3 +251,192 @@ localization 的 D15/D18 已经证明「恒跳过的门禁」是本组织最真�
 叠加宿主 `loadavg 14.6`（12 核）⇒ 帧率塌陷触发 LOST。`docker restart` 清空后同一套用例
 `8 passed`。所以**整链门只当本地人工回归用，判红前先确认容器内没有残留 gz/ign 进程**；
 这也是它不进 CI 的又一条理由（runner 上无法保证这种干净度）。
+
+## D16 Nav2 用**派生**导航栅格，官方 PGM 只给定位
+
+**决定**：定位继续吃 `src/foray_rmul_2027_field/maps/rmul_2027/rmul_2027.pgm`（A4/A5 的
+哈希契约不动），Nav2 另起一张**派生图** `src/foray_simulation_bringup/map/nav2/rmul_2027_nav.pgm`，
+由 `scripts/make_nav_map.py` 从官方图逐像素复制后，只把隧道顶投影矩形
+（x 3.325–3.675 / y 7.06–7.86，共 462 格）由全占据改成全自由，其余 res/origin/thresholds 逐字保持。
+
+**理由**：
+- 官方图把高地与隧道顶的**投影**都画成占据，对平面底盘偏保守；`parameters.json` 的
+  `limitations` 自己写着「The supplied PGM conservatively blocks highlands and tunnel roof
+  footprints for this planar robot」「A lidar-only occupancy slice differs from a chassis
+  traversability map」。也就是说，官方图不是「底盘能不能走」的图，直接喂 Nav2 必然判隧道不可通。
+- 反过来，从 PCD 重建栅格不成立：`map/rmul_2027/rmul_2027.pcd` 是 8 cm 采样（102433 点），
+  投到 0.025 m 栅格只点亮 1510 格，中间有洞，Nav2 会当成零星障碍物。
+- 隧道金属顶在 z 0.25–0.27，底盘包络 z 0–0.15，垂直净空 0.2495 m ⇒ 底盘物理上能过，
+  「占据」只对雷达投影成立。派生图清掉的正是这一块不该算给底盘的格子。
+
+**代价与护栏**：多一张图就必须防它被手改。`test/test_nav_map.py` 固化了三条断言：
+差异必须**只有**这 462 格且全部落在投影内（不许新增占据）、矩形内必须全自由、
+x=2.6/3.0/3.3375/3.5/3.6625/3.9/4.3 各列连续自由带 ≥ 0.70 m。生成脚本幂等
+（固定 PGM 头 + 只改 yaml 的 `image:` 行），仓库里的 sha256 是
+`00f3d2f775d7fbb784a0d2aa8153df60dbdc193082ac15e6cd9c62cbbc6eeb1b`。
+隧道顶投影的边界从 `parameters.json` 的 `highland_southwest` / `metal_strip_west_offset` /
+`metal_strip_width` / `highland_north_y` / `tunnel_clear_span` 现算，不在脚本里写死数字。
+
+## D17 `odom→base_footprint` 由上游 `sensor_scan_generation` 补，Nav2 只做装配
+
+**决定**：不自己写 TF 广播节点，用上游两件套补链条：
+`loam_interface`（`/aft_mapped_to_init` → `/lidar_odometry` + `/cloud_registered`，只发
+`odom→雷达` 的里程计消息，不发 TF）+ `sensor_scan_generation`（订阅这两条，发
+`odom→base_footprint` TF 与 `/odometry` 话题）。Nav2 本体用
+`IncludeLaunchDescription(nav2_bringup/launch/navigation_launch.py)` 装配，不手抄 8 个节点；
+`map_server` 与它的 lifecycle_manager 由本仓单独起，**不用 amcl**。
+
+**理由**：
+- `foray_localization` 只发 `map→odom`，`robot_state_publisher` 吃的是无 joint 的 SDF，
+  所以 `odom→base_footprint` 这一段在本仓原本是空的——Nav2 的 costmap 一查就
+  `Extrapolation Error ... from frame [base_footprint] to frame [map]`。
+- `sensor_scan_generation` 恰好就是干这件事的上游实现（`publishTransform(tf_odom_to_chassis,
+  odometry->header.frame_id, base_frame_)`），且 `robot_base_frame` 可配；我们没有云台，
+  三个 frame 参数都填 `base_footprint`。
+- 不启 amcl：amcl 会自己发 `map→odom`，和 `foray_localization` 抢同一条边，定位会跳。
+
+**代价**：`sensor_scan_generation` 依赖 `lidar→base` 静态 TF，那条边由
+`localization_sim.launch.py` 发，所以 `navigation_sim.launch.py` 必须 include 它而不是
+另起仿真；两个节点都用 `respawn=True` 兜住启动顺序。
+
+## D18 验收脚本入库（A2/A3/A6），门禁自检也入库
+
+**决定**：把运行时判据固化成 `scripts/accept.py`（`ready` / `a2` / `a3` 三条子命令，
+单行 `key=value` + `verdict=PASS|FAIL`），并把 `scripts/ci/selftest.py` 接进 CI。
+D15 里「A2 判据门脚本没入库」的欠账一并还清。
+
+**理由**：
+- 判据写在会话里、结论写在 `plan.md` 里，等于不可复现：D15 自己就记了一次误判
+  （残留进程 + 高负载 ⇒ 假 LOST）。判据只有变成能重跑的命令，才谈得上「取证」。
+- 脚本取不到真值时打印 `ground_truth=none` 并让判据失败，而不是悄悄用过默认起点——
+  假通过比判红危险。
+- `gate-selftest` 的理由同 D15 的欠账段落：一个被改坏的门禁会安静地一直通过。
+  `selftest.py` 复制仓库到临时目录、`git init` 后注入五类缺陷
+  （CRLF / tree 少一行 / 多一个未登记文件 / 删掉已登记文件 / `.foray-layer` 反向依赖），
+  断言对应门禁非零退出，最后跑干净副本必须三门全绿。它不需要 Docker，所以能进 CI。
+
+## D19 本仓采用 Apache-2.0
+
+**决定**：仓根 `LICENSE` 用 Apache License 2.0 全文（202 行，取自 Debian
+`/usr/share/common-licenses/Apache-2.0`，逐字节未经改写）；两个 `package.xml` 的
+`<license>` 由 `TODO` 改为 `Apache-2.0`；`THIRD_PARTY_NOTICES.md` §5 记版权行
+`Copyright 2026 ZQU-Foray` 与授权范围。
+
+**理由**：上游 `pb2025_*`、`rmu_gazebo_simulator`、`rmoss_*` 都是 Apache-2.0，同许可证
+才能逐文件搬用片段而不引入混用；同时保留专利授权与免责条款。场地迁移包与官方 STEP
+不在授权范围内（§2 已声明），本次不改它们的归属说明。
+
+## D20 `cmd_vel` 桥接的 gz 侧话题必须带 `/model/` 前缀
+
+**决定**：`src/foray_simulation_bringup/config/bridge.yaml` 的 `cmd_vel` 条目的
+`gz_topic` 由 `/foray_sim_robot/cmd_vel` 改为 `/model/foray_sim_robot/cmd_vel`。
+
+**理由（实测证据）**：`ignition-gazebo-velocity-control-system` 在模型命名空间下订阅，
+启动日志原话是 `VelocityControl subscribing to twist messages on
+[/model/foray_sim_robot/cmd_vel]`。原来的桥接把 ROS `/cmd_vel` 转发到
+`/foray_sim_robot/cmd_vel`，桥接日志照样打印「Creating ROS->GZ Bridge」、ROS 侧
+`ros2 topic pub` 也照常成功，**但车永远不动**——是一个只靠 `ign topic -l` 看不出、
+只有对比真值位姿才会暴露的静默错接。
+
+- 错接时：`ros2 topic pub -r 20 /cmd_vel ... "{linear: {x: 0.5}}"` 持续 10 s，
+  `/sim/pose_info` 里 `foray_sim_robot` 一直停在 (6.0, 4.0)。
+- 改对后：同样命令 9 s，真值 x 由 6.0 变 7.35（墙钟 9 s、RTF ≈ 0.3，与
+  `0.5 m/s × 仿真时间` 相符）。
+
+**影响**：A3（Nav2 穿隧道）在修复前不可能通过——`controller_server` 只会反复
+`Failed to make progress`，因为速度从未进到物理引擎。A1/A2/A4/A5 不涉及运动，
+所以这个错接从迁移起一直没被发现。凡是以后改模型或桥接，必须用「发速度 + 读真值」
+验证闭环，不能只看话题列表。
+
+## D21 `rviz_config` 只收视图名或绝对路径，找不到就启动失败；调车视图另开 `tune.rviz`
+
+**决定**：`launch/simulation.launch.py` 新增 `rviz_config` 参数（默认 `sim.rviz`），
+并在 `localization_sim.launch.py`、`navigation_sim.launch.py` 逐层透传；
+`scripts/sim_up.sh` 增 `--rviz-config F` 与 `--tune` 简写。解析规则：含路径分隔的绝对
+路径直接用，否则拼 `share/rviz/<名字>`；文件不存在时抛错并列出现有候选，不静默空窗。
+调车视图另立 `rviz/tune.rviz`，`rviz/sim.rviz` 一字不改，仍作 A0/A2 取证的最小集。
+
+**理由**：
+- RViz 用不存在的 `-d` 配置启动时窗口照开、只是一片空场，调车时最容易被误判成
+  「话题没数据」。把失败前移到 launch 阶段，一行报错胜过半小时 echo。
+- 视图是调试物，不该随着调车需求反复改验收基线：`sim.rviz` 的显示项被
+  `test/test_tune_configs.py` 锁成 `{TF, /livox/lidar, /map}`，谁改谁红。
+- 手写 `.rviz` 的话题名打错时 RViz 只会显示空数据，所以话题进白名单
+  （每条注明来源：`bridge.yaml` / nav2 参数 / launch 常量），新话题必须显式登记。
+
+**已知限制（待容器回执）**：宿主没有 `rviz2`/`gz`，本轮只做到 YAML 结构、
+话题白名单与 launch 参数解析一级；「窗口真开出来且每项有数据」、
+`Odometry` display 是否支持 `Keep`（累积轨迹）、`/map` 是否被
+`foray_map_server` 与 nav2 `map_server` 双发布，都要在
+`foray_sim:humble-fortress` 容器里补证。
+
+## D22 gz GUI 面板用绝对 x/y 摆放，`WorldControl` 必须显式 `start_paused=false`
+
+**决定**：`config/gui.config` 在原有 `MinimalScene` + `GzSceneManager` 之后追加
+`WorldControl`、`WorldStats`、`EntityTree`、`ComponentInspector` 四个面板，每个用
+`<ignition-gui><property key="x"/"y">` 给绝对像素位置（左上两块、右侧两块），
+`WorldControl` 显式写 `<start_paused>false</start_paused>`，
+`test/test_tune_configs.py` 把「必需面板集合」「浮窗必须有 x/y」「start_paused 必须是
+false」三条写成断言。
+
+**理由**：
+- 面板不给 x/y 时全部叠在窗口左上（3D 视图正中），调车时等于没开。
+- `start_paused` 若写成 `true`，世界一启动就停在暂停态：`/clock` 不走、`/livox/lidar`
+  一帧不推，A2/A3 会表现为「全链没数据」，而 GUI 侧看起来完全正常。
+- `WorldControl` 的 `<service>` 与 `WorldStats` 的 `<topic>` 故意留空：不写才按当前
+  世界名推导（`/world/rmul_2027/...`），写死会在换世界后静默失效——和 D20 同一类坑。
+
+**待补回执**：宿主无 `gz`，插件注册名尚未在容器内用 `ign gui -l` 逐条核对；布局也只
+按经验值摆放（1400 px 宽窗口）。容器里首次开 GUI 时需确认：四个面板都出现、
+没有压在机器人身上、暂停/单步按钮可用。若某面板类名与实际注册名不符，
+`gz sim` 会在终端打印 `Failed to load plugin`，此时改 `gui.config` 的 `filename`
+并同步 `KNOWN_GZ_GUI_PLUGINS`。
+
+## D23 调车 rqt 用启动器按需拉面板，且不写进 `package.xml`
+
+**决定**：新增 `scripts/tune_rqt.sh`（装到 `lib/foray_simulation_bringup`），由
+`navigation_sim.launch.py` 的 `rqt:=true` 以普通 `Node` 拉起；`sim_up.sh` 加 `--rqt`
+（`--no-nav` 时自动收掉，因为 `localization_sim.launch.py` 没有该参数）。
+脚本逐个 `command -v` 检查 `rqt_graph`/`rqt_topic`/`rqt_plot`/`rqt_console`/
+`rqt_tf_tree`/`rqt_image_view`，缺哪个就打印 `ros-<distro>-rqt-*` 包名再继续，
+一个都没有才非零退出；`trap` 统一收摊。**`package.xml` 不声明 rqt 依赖。**
+
+**理由**：
+- 不用 `rqt --perspective-file`：perspective 是 Qt 的二进制布局，手写必然与安装的 Qt
+  版本不符，加载失败时只得到一片空白窗口，比没开更误导。按需拉独立面板则降级自然。
+- 缺面板不整组失败：调控制器时最要紧的是 `rqt_plot` 的「下发 vs 实际速度」，
+  不能因为没装 `rqt_graph` 就全丢。
+- 不写 `package.xml`：rqt 只是可选调试工具，写进 `exec_depend` 会让 CI 镜像与
+  `rosdep` 安装链条变重，而 CI 从不打开任何窗口。代价是容器里要手动装，
+  脚本已经把该执行的命令打出来了。
+- `test/test_tune_rqt.py` 把三条行为锁住：语法、面板清单、缺 rqt 时的非零退出与包名提示；
+  另加 `sim_up.sh --rqt` 的透传与 `--no-nav` 收敛断言。
+
+**未覆盖**：面板真实弹出、`rqt_plot` 三条曲线真的有数据，需在
+`foray_sim:humble-fortress` 容器 + X11 下人工确认。
+
+## D24 调车快照用统一采样窗口，缺数据标 `missing` 而不是 0 Hz
+
+**决定**：新增 `scripts/tune_report.py`（装到 `lib/foray_simulation_bringup`），用一个
+`--window` 窗口同时采样 `/livox/lidar`、`/cloud_registered`、`/aft_mapped_to_init`、
+`/odometry`、`/localization/state`、`/cmd_vel`、`/sim/pose_info`，并按
+`map→odom→base_footprint→front_mid360` 逐段查 TF，最后输出人读表格或 `--json`
+（顶层键 `generated_at`/`window_s`/`topics`/`tf`/`localization`/`cmd_vs_truth`）。
+失效阈值直接复用 D13 的 `ODOM_TIMEOUT_SEC=2.0`、`LIDAR_TIMEOUT_SEC=2.5`、
+`LOST_TIMEOUT_SEC=5.0`；顶层不 import rclpy，判断逻辑全在纯函数里。
+
+**理由**：
+- 调车时「车不动」至少有四种成因（速度没进物理引擎、点云断流、TF 断链、定位 LOST），
+  逐条 `ros2 topic hz` 采样窗口各不相同，结论对不上；统一窗口才能互相印证。
+- 取不到就标 `missing`、`hz` 留 `None`：把「没数据」显示成 `0 Hz` 会让人误判成
+  「发布者存在但极慢」，而实际是根本没发布者。
+- 顶层不 import rclpy，宿主就能跑 `test/test_tune_report.py`（10 Hz 合成序列、
+  2.0 s 边界判 stale、空序列判 missing、`--json` 键契约），不必等容器。
+
+**已踩过的坑（写进代码注释）**：`/sim/pose_info` 桥过来是 `tf2_msgs/TFMessage`
+（gz 的 `pose/info`），不是位姿消息本体；要按 `child_frame_id` 取
+`foray_sim_robot/chassis`，退回模型根位姿。`LocalizationState` 用
+`state` 常量 + `pose_valid`，没有 `status` 字段——初版按 `status` 写是错的。
+
+**未覆盖**：真实话题上的频率数值、TF 查询在 `use_sim_time` 下的表现、
+`/cmd_vel` 与真值位移的偏差量级，都要在容器里跑一次才有回执。
