@@ -20,8 +20,8 @@
 import argparse
 import json
 import sys
-import time
 from datetime import datetime, timezone
+from itertools import pairwise
 
 # 与 decision.md D13 的定位判据同源：超过这些秒数没有新帧，就按「失联」处理
 ODOM_TIMEOUT_SEC = 2.0
@@ -51,7 +51,11 @@ REQUIRED_TOPICS = (
 
 DEBUG_TOPICS = ("/cmd_vel", "/sim/pose_info")
 
-TF_CHAIN = (("map", "odom"), ("odom", "base_footprint"), ("base_footprint", "front_mid360"))
+TF_CHAIN = (
+    ("map", "odom"),
+    ("odom", "base_footprint"),
+    ("base_footprint", "front_mid360"),
+)
 
 DEFAULT_WINDOW_SEC = 5.0
 DEFAULT_DEADLINE_SEC = 15.0
@@ -66,7 +70,7 @@ def summarize_hz(stamps):
         return {"count": 1, "hz": None, "max_gap_s": None}
     ordered = sorted(stamps)
     span = ordered[-1] - ordered[0]
-    gaps = [b - a for a, b in zip(ordered, ordered[1:])]
+    gaps = [b - a for a, b in pairwise(ordered)]
     return {
         "count": count,
         # 用「样本数 - 1」除以跨度：首尾各算一次，含 0 样本偏差更小
@@ -207,7 +211,9 @@ def format_table(report):
     lines.append(f"TF 链 {'完整' if tf.get('chain_ok') else '断裂'}：{tf.get('detail', '')}")
     loc = report["localization"]
     age = "-" if loc.get("age_s") is None else f"{loc['age_s']:.1f}s"
-    lines.append(f"定位：state={loc.get('state')} pose_valid={loc.get('pose_valid')} 距今={age}")
+    lines.append(
+        f"定位：state={loc.get('state')} pose_valid={loc.get('pose_valid')} 距今={age}"
+    )
     cmd = report["cmd_vs_truth"]
     lines.append(
         "速度对照：cmd={} truth={} 偏差={}".format(
@@ -217,13 +223,16 @@ def format_table(report):
         )
     )
     problems = overall_ok(report)
-    lines.append("verdict=" + ("PASS" if not problems else "FAIL " + ", ".join(problems)))
+    verdict = "PASS" if not problems else "FAIL " + ", ".join(problems)
+    lines.append("verdict=" + verdict)
     return "\n".join(lines)
 
 
 def parse_args(argv):
     parser = argparse.ArgumentParser(description="调车用话题/坐标链健康快照")
-    parser.add_argument("--window", type=float, default=DEFAULT_WINDOW_SEC, help="采样窗口（秒）")
+    parser.add_argument(
+        "--window", type=float, default=DEFAULT_WINDOW_SEC, help="采样窗口（秒）"
+    )
     parser.add_argument(
         "--deadline",
         type=float,
@@ -235,14 +244,13 @@ def parse_args(argv):
 
 
 def collect(args):
-    """在真实 ROS 图上采样；rclpy 只在这里导入，宿主跑单测不会碰它。"""
-    import rclpy  # noqa: PLC0415 - 故意延后导入，见模块 docstring
+    """在真实 ROS 图上采样；ROS 相关导入只在这里发生，宿主跑单测不会碰它。"""
     from rclpy.node import Node
     from tf2_ros import Buffer, TransformListener
 
     watched = REQUIRED_TOPICS + DEBUG_TOPICS
 
-    class Collector(Node):  # noqa: D101 - 内部一次性节点
+    class Collector(Node):  # 内部一次性节点
         def __init__(self):
             super().__init__("tune_report")
             self.stamps = {name: [] for name in watched}
@@ -252,7 +260,7 @@ def collect(args):
             self.tf_buffer = Buffer()
             self.tf_listener = TransformListener(self.tf_buffer, self)
 
-            from rclpy.qos import QoSPresetProfiles  # noqa: PLC0415
+            from rclpy.qos import QoSPresetProfiles
 
             for name in watched:
                 # 传感器用 Best Effort，其余用默认 profile：用错 profile 会「订阅得上但收不到」
@@ -283,34 +291,34 @@ def collect(args):
 def get_type(name):
     """话题 → 消息类型（延迟导入，避免宿主没有 ROS 时 import 失败）。"""
     if name == "/livox/lidar":
-        from sensor_msgs.msg import PointCloud2  # noqa: PLC0415
+        from sensor_msgs.msg import PointCloud2
 
         return PointCloud2
     if name == "/cloud_registered":
-        from sensor_msgs.msg import PointCloud2  # noqa: PLC0415
+        from sensor_msgs.msg import PointCloud2
 
         return PointCloud2
     if name in {"/aft_mapped_to_init", "/odometry"}:
-        from nav_msgs.msg import Odometry  # noqa: PLC0415
+        from nav_msgs.msg import Odometry
 
         return Odometry
     if name == "/cmd_vel":
-        from geometry_msgs.msg import Twist  # noqa: PLC0415
+        from geometry_msgs.msg import Twist
 
         return Twist
     if name == "/localization/state":
-        from foray_localization_ros.msg import LocalizationState  # noqa: PLC0415
+        from foray_localization_ros.msg import LocalizationState
 
         return LocalizationState
     # 真值走 gz 的 pose/info，桥过来是 TFMessage（见 config/bridge.yaml 与 accept.py）
-    from tf2_msgs.msg import TFMessage  # noqa: PLC0415
+    from tf2_msgs.msg import TFMessage
 
     return TFMessage
 
 
 def check_tf(buffer):
     """逐段查 TF 链，返回 {chain_ok, detail}。"""
-    from rclpy.time import Time  # noqa: PLC0415
+    from rclpy.time import Time
 
     broken = []
     for parent, child in TF_CHAIN:
@@ -329,7 +337,7 @@ def main(argv=None):
     args = parse_args(argv if argv is not None else sys.argv[1:])
 
     try:
-        import rclpy  # noqa: PLC0415
+        import rclpy
     except ModuleNotFoundError:
         # 宿主没有 ROS：给出可执行的提示，而不是一坨 traceback
         print(
