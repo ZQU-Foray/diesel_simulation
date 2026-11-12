@@ -123,7 +123,11 @@ diesel_simulation/
         │   ├── localization_sim.launch.py     #   点云转换 + point_lio + 定位服务
         │   └── navigation_sim.launch.py       #   定位 + odom→base 补全 + Nav2（A3/A6）
         ├── config/
-        │   ├── bridge.yaml                    #   ros_gz_bridge 话题映射
+        │   ├── bridge.yaml                    #   桥接契约：gz 话题模板 + ROS 话题 + expect
+        │   ├── fields/
+        │   │   └── rmul_2027.yaml             #   场地规格：世界 / 地图 / nav2 参数 / A3 目标点
+        │   ├── robots/
+        │   │   └── sentry.yaml                #   机器人规格：SDF / 帧名 / 雷达装位与视场
         │   ├── gui.config                     #   gz GUI 布局（3D 视图 + 调车四面板）
         │   ├── point_lio_sim.yaml             #   point_lio 仿真参数（上游默认值）
         │   └── nav2_params_sim.yaml           #   Nav2 仿真参数（按 0.8 m 通道重标）

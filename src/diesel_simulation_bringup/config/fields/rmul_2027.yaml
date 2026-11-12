@@ -1,0 +1,28 @@
+# 场地规格（decision.md D28）：所有「换场地会变」的值都在这里。
+#
+# 引用其他包的资源写成 {package, path}，读的时候经 ament 索引解析成绝对路径
+# （diesel_sim_tools/profile.py::_resolve）；只写字符串时按「相对本包 share」解析。
+# 新增一个场地 = 复制本文件改值 + 在 models/ 里放好世界与网格，不改 Python。
+
+name: rmul_2027
+
+# 世界 SDF 与它引用的 model:// 资源目录（GZ_SIM_RESOURCE_PATH 指向 models）
+world: {package: diesel_rmul_2027_field, path: worlds/rmul_2027.sdf}
+models: {package: diesel_rmul_2027_field, path: models}
+
+maps:
+  # 官方地图：A5 的比对基准，也是 diesel_localization 的 manifest 口径来源
+  official: {package: diesel_rmul_2027_field, path: maps/rmul_2027/rmul_2027.yaml}
+  # 派生导航图：只清隧道顶投影（D16），Nav2 用这张
+  nav: {package: diesel_simulation_bringup, path: map/nav2/rmul_2027_nav.yaml}
+  # 定位侧输入目录：PCD + PGM + manifest.yaml（A4 的哈希口径）
+  localization: {package: diesel_simulation_bringup, path: map/rmul_2027}
+
+# Nav2 参数文件（相对本包 share）
+nav2_params: config/nav2_params_sim.yaml
+
+acceptance:
+  # A3 的目标点：隧道对侧（隧道内净空 0.2495 m，见 README §1）
+  goal: {x: 2.0, y: 7.4, yaw: 3.141592653589793}
+  # A3 的判据窗口 [x0, x1, y0, y1]：轨迹至少一点落在这个矩形内
+  tunnel_rect: [3.325, 3.675, 7.06, 7.86]
