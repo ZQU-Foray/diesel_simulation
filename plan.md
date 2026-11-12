@@ -35,6 +35,25 @@
       346 条 `Invalid frame ID "odom"`。顺带说明 D27「已知未决」里 `4/6 不可观 → LOST`
       这次没有复现（`last_state=OK`、`lost=0`），点云稠密度随起链时序波动，仍需跟踪。
 
+## M13 装配层解耦（2026-11-12，分支 `feat/sim-assembly-decoupling`）
+
+需求见 README §1 的 A8 / A9 与 §3.1；关键取舍见 `decision.md` D29。基线 `2639d93`。
+
+- [ ] I17 `diesel_sim_tools` 库包落地：`engine_gz.py`（资源路径 / 世界参数 / spawn 参数 /
+      真值话题）、`bridge.py`（契约渲染）、`profile.py`（场地与机器人规格读取）+ 单测。
+- [ ] I18 桥接契约化：`bridge.yaml` 加 `id`、`{world}` / `{robot}` 占位、`expect`；
+      渲染后残留占位符即失败并指出 `id`。
+- [ ] I19 profile 落盘：`config/fields/rmul_2027.yaml`、`config/robots/sentry.yaml`。
+- [ ] I20 `simulation.launch.py` 接装配层：世界 SDF、机器人 SDF、spawn 位姿、资源路径不再写字面量。
+- [ ] I21 `localization_sim.launch.py` 接装配层：雷达装位、线数、视场、帧名、manifest 目录来自 profile。
+- [ ] I22 `navigation_sim.launch.py` 接装配层：nav2 参数文件与派生导航图路径来自 field profile。
+- [ ] I23 `accept.py` 读 profile 的验收目标点与隧道窗口；`ready` 增加 A9 桥接契约自检。
+- [ ] I24 收尾：`tree.md` / `README` / 门禁全绿（`check_style`、`check_tree_doc`、`check_layer`、`selftest`、ctest）。
+
+基线回执（S0）：待补。已知阻塞——命名空间化后 Nav2 订阅的是 `<ns>/tf`，而 TF 发布者在
+全局 `/tf`，`controller_server` 报 `Timed out waiting for transform from base_footprint to
+odom ... Invalid frame ID "odom"`，`ready` 卡在 lifecycle（D27 未覆盖 TF remap 一项）。
+
 ## M11 联调缺陷整改（2026-11-12，分支 `fix/m11-body-tf`）
 
 `diesel_localization/plan.md` M11 的仿真侧三项已落地并取证，本 PR（#6 → `dev`）：

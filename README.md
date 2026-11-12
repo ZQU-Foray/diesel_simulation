@@ -19,6 +19,8 @@ ZQU-Foray 的 RMUL 2027 3v3 **场地仿真仓**：在 Gazebo 里搭出赛季场�
 | A5 | 地图同源 | 由网格采样的 PCD 与官方地图的占据 IoU ≥ 0.90 |
 | A6 | 一键启动 | `sim_up.sh` 300 s 内整链起来（仿真 + 桥 + 定位 + Nav2 全部 active） |
 | A7 | 致谢完整 | 三方来源的归属链写进 `THIRD_PARTY_NOTICES.md` |
+| A8 | 装配可配置 | 场地、机器人、桥接三份规格（`config/fields/<field>.yaml`、`config/robots/<robot>.yaml`、`config/bridge.yaml`）是装配的唯一输入：三条 launch 不直接书写场次名 / 机器人名 / gz 话题字面量；桥接规格里的占位符（`{world}` / `{robot}`）在启动前必须全部替换，残留即启动失败并指出条目 `id` |
+| A9 | 桥接契约自检 | `accept.py ready` 对 `bridge.yaml` 每条 `expect` 断言对应 ROS 话题按方向存在发布者 / 订阅者；缺失时按条目 `id` 报错并非零退出（D20 类静默错接必须在这里被拦下） |
 
 进度与阶段划分见 `plan.md`；关键取舍见 `decision.md`。
 
@@ -45,16 +47,31 @@ diesel_simulation/
 │   │   ├── docs/                     # 场地规格与 STEP 审计
 │   │   ├── previews/                 # 场地预览图
 │   │   └── tools/                    # 上游审计/生成脚本（只读参考）
-│   └── diesel_simulation_bringup/     # 启动层（launch / config / 地图 / 脚本）
+│   ├── diesel_sim_tools/              # 装配库（纯 Python：引擎适配 / 桥接渲染 / profile）
+│   └── diesel_simulation_bringup/     # 装配层（launch / profile / 桥接契约 / 地图 / 脚本）
 │       ├── map/rmul_2027/            # PCD + PGM + manifest.yaml（定位侧输入）
 │       ├── map/nav2/                 # 派生导航栅格（只清隧道顶投影，见 D16）
 │       ├── launch/                   # simulation / localization_sim / navigation_sim
-│       ├── config/                   # bridge / point_lio_sim / nav2_params_sim
+│       ├── config/                   # bridge.yaml + fields/（场地）+ robots/（机器人）+ 调参
 │       ├── scripts/                  # make_pcd / make_manifest / make_nav_map / sim_up / accept
 │       └── test/                     # A4 / A5 / 导航栅格回归
 ├── README.md  AGENTS.md  tree.md  plan.md  decision.md
 └── THIRD_PARTY_NOTICES.md
 ```
+
+### 3.1 装配层：profile 与桥接契约
+
+三条 launch 不写死场地与机器人，装配输入只有三份规格：
+
+| 规格 | 管什么 | 内容 |
+|---|---|---|
+| `config/fields/<field>.yaml` | 场地 | 世界 SDF、模型资源目录、官方地图、派生导航图、验收目标点与隧道窗口 |
+| `config/robots/<robot>.yaml` | 机器人 | 机体 SDF、`model_name`、雷达链路与装位、线数与视场、帧名 |
+| `config/bridge.yaml` | 桥接 | 每条桥接件的 `id` / gz 话题模板 / ROS 话题与类型 / 方向 / `expect` |
+
+- **占位符**：gz 话题里用 `{world}` / `{robot}` 引用 profile 的值。启动前渲染，**残留未替换的占位符即启动失败**并指出条目 `id`——这类话题写错不会报错、只会静默断流（D20），必须靠前置校验拦住。
+- **扩展一路桥接件**：在 `bridge.yaml` 加一条声明、在 `model.sdf` 加对应传感器片段、必要时在 robot profile 里登记装位，不改 Python 代码。
+- **边界**：本轮只做单引擎（Fortress）的声明式装配；多引擎插件化、资产热切换都不做，见 `decision.md` D29。
 
 ## 4. 数据链
 
