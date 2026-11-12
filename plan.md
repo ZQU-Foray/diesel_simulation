@@ -37,22 +37,52 @@
 
 ## M13 装配层解耦（2026-11-12，分支 `feat/sim-assembly-decoupling`）
 
-需求见 README §1 的 A8 / A9 与 §3.1；关键取舍见 `decision.md` D29。基线 `2639d93`。
+需求见 README §1 的 A8 / A9 与 §3.1；关键取舍见 `decision.md` D29。
+基线：`dev` 的 `95cb331`（含 PR #9 命名空间统一与 PR #10 TF 中继）。原分支基线 `2639d93`
+未进 `dev`，故本分支 rebase 到 `dev` 后重取基线。
+基线回执（S0，改写前）：`a2 max_xy_err=0.033 lost=0 verdict=PASS`；S0 时 `ready` 卡 lifecycle
+（`Timed out waiting for transform` 1280 条）——该缺陷已由 PR #10 的 `tf_relay` 修掉，
+修后 `ready=PASS ready_delay_s=0.01 bt_navigator=active controller_server=active`（见 M12 回执）。
 
-- [ ] I17 `diesel_sim_tools` 库包落地：`engine_gz.py`（资源路径 / 世界参数 / spawn 参数 /
+- [x] I17 `diesel_sim_tools` 库包落地：`engine_gz.py`（资源路径 / 世界参数 / spawn 参数 /
       真值话题）、`bridge.py`（契约渲染）、`profile.py`（场地与机器人规格读取）+ 单测。
-- [ ] I18 桥接契约化：`bridge.yaml` 加 `id`、`{world}` / `{robot}` 占位、`expect`；
+- [x] I18 桥接契约化：`bridge.yaml` 加 `id`、`{world}` / `{robot}` 占位、`expect`；
       渲染后残留占位符即失败并指出 `id`。
-- [ ] I19 profile 落盘：`config/fields/rmul_2027.yaml`、`config/robots/sentry.yaml`。
-- [ ] I20 `simulation.launch.py` 接装配层：世界 SDF、机器人 SDF、spawn 位姿、资源路径不再写字面量。
-- [ ] I21 `localization_sim.launch.py` 接装配层：雷达装位、线数、视场、帧名、manifest 目录来自 profile。
-- [ ] I22 `navigation_sim.launch.py` 接装配层：nav2 参数文件与派生导航图路径来自 field profile。
-- [ ] I23 `accept.py` 读 profile 的验收目标点与隧道窗口；`ready` 增加 A9 桥接契约自检。
-- [ ] I24 收尾：`tree.md` / `README` / 门禁全绿（`check_style`、`check_tree_doc`、`check_layer`、`selftest`、ctest）。
+- [x] I19 profile 落盘：`config/fields/rmul_2027.yaml`、`config/robots/sentry.yaml`。
+- [x] I20 `simulation.launch.py` 接装配层：世界 SDF、机器人 SDF、spawn 位姿、资源路径不再写字面量。
+- [x] I21 `localization_sim.launch.py` 接装配层：雷达装位、线数、视场、帧名、manifest 目录来自 profile。
+- [x] I22 `navigation_sim.launch.py` 接装配层：nav2 参数文件与派生导航图路径来自 field profile。
+- [x] I23 `accept.py` 读 profile 的验收目标点与隧道窗口；`ready` 增加 A9 桥接契约自检。
+- [x] I24 收尾：`tree.md` / `README` / 门禁全绿（`check_style`、`check_tree_doc`、`check_layer`、`selftest`、ctest）。
 
-基线回执（S0）：待补。已知阻塞——命名空间化后 Nav2 订阅的是 `<ns>/tf`，而 TF 发布者在
-全局 `/tf`，`controller_server` 报 `Timed out waiting for transform from base_footprint to
-odom ... Invalid frame ID "odom"`，`ready` 卡在 lifecycle（D27 未覆盖 TF remap 一项）。
+回执（2026-11-12，分支 `feat/sim-assembly-decoupling`，宿主直跑）：
+
+- 静态门禁：`check_style.py` 文件卫生通过；`check_tree_doc.py` 119 文件 / 36 目录双向一致；
+  `check_layer.py` 依赖方向通过（layer=META）；`selftest.py` 5 条注入全被拦下；
+  `ruff check src` All checks passed；`black --check src` 31 files unchanged。
+- 单元/资产测试：`colcon test --packages-select diesel_sim_tools` 3/3；
+  `diesel_simulation_bringup` 7/7（manifest / pcd_align IoU=0.9331 / nav_map / tune_* / tf）。
+- 起链（`navigation_sim.launch.py headless:=true`，ROS_DOMAIN_ID=149 / GZ_PARTITION=i24c）：
+  RTF `0.9996`、`/livox/lidar` 9.104 Hz、`/livox/lidar` height=32 width=1875、
+  `bridge_missing=none`（A9 自检通过）、`[Err]` 0 条。
+- `ready=FAIL ready_delay_s=timeout lidar_s=4.64 localization_s=1.13 bt_navigator=inactive
+  controller_server=None last_state=OK state_reason="warmup complete"`——**与 S0 基线同一失败点**。
+- `a2 samples=4647 first_ok_delay=0.00 max_xy_err=0.040 max_yaw=0.185 last_state=OK lost=0
+  ground_truth=diesel_sim_robot verdict=PASS`（S0：0.033 / 同一 ground_truth）。
+- `a3` 在 `wait_ready` 处异常退出（尾部 `RCLError: failed to shutdown: rcl_shutdown already
+  called ... rcl/init.c:241`），与 S0 基线同一签名。
+
+等价性判据（D28）：A3 本就 FAIL，因此以「A0–A2 回执 + A3 失败指纹」比对——a2 同一判据通过、
+误差同量级（0.040 对 0.033），ready/a3 卡在同一处、TF 超时 553 条（S0 为 1280 条，同为
+Nav2 未激活的副作用，随宿主负载波动）。数据链、话题名、点云元数据（32×1875）均与改写前一致。
+
+已知阻塞（**已解决，留档**）：命名空间化后 Nav2 各节点订阅 `<ns>/tf`、`<ns>/tf_static`，
+而 TF 由 `robot_state_publisher` / `body_static_tf` / `sensor_scan_generation` 发在全局
+`/tf`，`controller_server` 报 `Timed out waiting for transform from base_footprint to odom ...
+Invalid frame ID "odom"`，costmap 永不激活 ⇒ `ready` 卡在 lifecycle。
+**该缺陷已由 PR #10（`fix/nav2-tf-relay`，commit `6bd7daa`，决策 D28）用 `tf_relay` 中继修掉**，
+修后 `ready=PASS`、`a2` PASS（回执见 M12）。本重构分支 rebase 到 `dev` 后已带上该修复；
+原先另开的任务 `nav2-ns-tf-remap` 随之作废（需求记录已标注作废原因）。
 
 ## M11 联调缺陷整改（2026-11-12，分支 `fix/m11-body-tf`）
 
