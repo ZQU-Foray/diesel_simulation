@@ -500,3 +500,43 @@ false」三条写成断言。
 - **测量注意**：链一次只能有一条。`pkill` 在新的 PID 命名空间里杀不到上一轮进程，
   旧链会和新的同时发 `/clock`，把 RTF 量成 2.4（真值 1.000）。每次验证换新的
   `ROS_DOMAIN_ID`。
+
+## D27 Nav2 整栈进 `/diesel/<robot>`：三处必须显式做的事
+
+<!-- lint: allow-long-lines -->
+Context：定位侧的话题改相对名后（`diesel_localization` D61），导航侧也要落到同一个
+`/diesel/<robot>`，否则多机同场时 `bt_navigator`、`costmap`、`cmd_vel` 会互相抢。
+
+Decision：
+
+1. **用 `PushRosNamespace` 包住 nav2 include**。humble 的
+   `nav2_bringup/launch/navigation_launch.py` 里 `namespace` 只用于参数 YAML 的
+   `root_key` 与组合容器名，非组合模式下**不给各 Node 加 namespace**。只传
+   `namespace:=` 的结果是参数键被改写成 `/diesel/sentry/<节点>`、节点名仍是全局的，
+   于是 Nav2 退回默认参数——实测日志 `Couldn't load critics!`、
+   `Controller frequency set to 20.0000Hz`（本仓配置是 10.0）。
+2. **参数 YAML 顶层键是相对节点名，进命名空间后必须重写**。`nav2_params_sim.yaml`
+   一直是相对键（`bt_navigator:` 等），`sentry.yaml` 也是（`diesel_localization:`、
+   `diesel_map_server:`）。节点进了命名空间，这些键匹配不上，ROS 2 会**静默丢弃**
+   整份参数——症状是启动行打印的是代码默认值而不是兵种配置。
+   对策：仿真侧两个 include 都在 launch 里用 `nav2_common.launch.RewrittenYaml`
+   以 `root_key=LaunchConfiguration("robot_namespace")` 包一层；`root_key` 解析为空串
+   时 `RewrittenYaml.perform()` 不改写，实车（无 namespace）行为不变。
+3. **跨边界话题写绝对名，TF 帧名不进 namespace**。`/odometry`（Nav2 的
+   `odom_topic`）与 `/cmd_vel`（gz 桥的 `ros_topic`）在两侧都被写死成绝对名，
+   否则相对名会解析成 `/diesel/sentry/odometry`、`/diesel/sentry/cmd_vel`，
+   桥建得起来、日志不报错，车永远不动。TF 帧（`map` / `odom` / `base_footprint` /
+   `body`）是全局契约，不随命名空间变化。
+
+Reason：`/cmd_vel` 与 `map` 是跨机器人共享资源的唯一入口，一旦进 namespace，
+gz 桥、`nav2_map_server` 与上游里程计就各自指向不同的话题，多机同场必然互相覆盖。
+
+Consequences：`accept.py` 的生命周期探针与 `NavigateToPose` action 客户端改为
+`<ns>/bt_navigator/get_state`、`<ns>/controller_server/get_state`、
+`<ns>/navigate_to_pose`；`robot_namespace` 提成 `navigation_sim.launch.py` 的
+launch 参数（默认 `/diesel/sentry`），实机换机器人只改这一个值。
+
+已知未决（2026-11-12 记，未修）：本机自编栈起链时 `align_source≈1223`、
+degeneracy `4/6 个方向不可观`，跨过 `max_unobservable_dofs: 3` 就会一路 LOST；
+M11 时代的容器栈是 `align_source≈1697`、`2/6`。点云为何变稀（`voxel=2171` 对
+M11 的 `3197`）尚未定位，不动兵种阈值——那是安全边界，不能为了仿真好看放宽。

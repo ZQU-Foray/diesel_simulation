@@ -5,6 +5,26 @@
 
 ## 当前断点（2026-11-11）
 
+## M12 ROS 运行时 namespace 统一（2026-11-12，分支 `feat/nav2-namespace`）
+
+上游决策见 `diesel_localization` D61 与 `decision.md` D27。
+
+- [x] 定位侧在本仓落地：`robot_namespace` launch 参数（默认 `/diesel/sentry`），
+      `diesel_localization`、`diesel_map_server` 加 `namespace=`。
+- [x] Nav2 整栈进同一命名空间：`PushRosNamespace` 包住 include，节点实测
+      `/diesel/sentry/{bt_navigator,controller_server,velocity_smoother,...}`，
+      `controller_server` 打印 `Activating controller: FollowPath of type
+      regulated_pure_pursuit_controller::OmniPidPursuitController`（参数命中）。
+- [x] 参数 YAML 在命名空间下重写：`RewrittenYaml(root_key=...)`，修复「兵种参数
+      被静默丢弃」——修后启动行打印 `min_source_points=100 max_unobservable_dofs=3
+      observability_ratio=0.050`（此前是代码默认的 `0/6/0.000`）。
+- [x] 跨边界话题显式绝对名：`nav2_params_sim.yaml` 的 `odom_topic` 三处改
+      `/odometry`，`bridge.yaml` 的 `ros_topic` 改 `/diesel/sentry/cmd_vel`；
+      桥的 `gz_topic` 仍是 `/model/diesel_sim_robot/cmd_vel`。
+- [x] `accept.py` 支持命名空间：生命周期探针与 `NavigateToPose` 走 `<ns>/...`。
+- [ ] 起链回执：当前工作区自编栈仍有 `4/6 不可观` → LOST（见 D27「已知未决」），
+      待点云变稀的原因查清后再取 `ready=PASS` 回执。
+
 ## M11 联调缺陷整改（2026-11-12，分支 `fix/m11-body-tf`）
 
 `diesel_localization/plan.md` M11 的仿真侧三项已落地并取证，本 PR（#6 → `dev`）：
