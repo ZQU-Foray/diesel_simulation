@@ -143,6 +143,7 @@ diesel_simulation/
             ├── test_manifest.py               #   A4：清单契约 + 篡改检测
             ├── test_nav_map.py                #   A3：派生图差异有界 + 通道宽度断言
             ├── test_localization_sim_launch.py  #   L1：launch 必须发 base_footprint -> body
+            ├── test_navigation_sim_tf_remap.py  #   M12：Nav2 进 namespace 后 tf 话题须拉回绝对名
             ├── test_tune_configs.py           #   调车视图话题白名单 + gz GUI 插件名
             ├── test_tune_rqt.py               #   调车 rqt 启动器行为（语法 / 缺包 / 透传）
             └── test_tune_report.py            #   调车快照：频率/失联判定 + --json 契约

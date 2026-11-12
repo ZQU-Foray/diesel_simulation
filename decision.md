@@ -540,3 +540,49 @@ launch 参数（默认 `/diesel/sentry`），实机换机器人只改这一个�
 degeneracy `4/6 个方向不可观`，跨过 `max_unobservable_dofs: 3` 就会一路 LOST；
 M11 时代的容器栈是 `align_source≈1697`、`2/6`。点云为何变稀（`voxel=2171` 对
 M11 的 `3197`）尚未定位，不动兵种阈值——那是安全边界，不能为了仿真好看放宽。
+
+## D28 Nav2 进 namespace 后必须用 `tf_relay` 把全局 TF 喂进去（`SetRemap` 无效）
+
+<!-- lint: allow-long-lines -->
+Context：D27 把 Nav2 整栈推进 `/diesel/sentry` 之后，`accept.py ready` 一直超时：
+节点全在、参数也对，但代价地图每秒刷 `Timed out waiting for transform from
+base_footprint to odom to become available, tf error: Invalid frame ID "odom" …
+frame does not exist`，`bt_navigator` 停在 `inactive`，`controller_server` 连
+`activating` 都没完成。定位侧同时是健康的（`state: OK`、`a2 verdict=PASS`）。
+
+实测证据（`navigation_sim.launch.py headless:=true`，t≈40 s）：
+
+```
+/diesel/sentry/tf          Publisher count: 0   Subscription count: 5
+/tf                        Publisher count: 4   Subscription count: 3
+```
+
+Nav2 各节点的 tf2 监听器按**相对名**订阅 `tf`/`tf_static`，`PushRosNamespace`
+之后落到 `/diesel/sentry/tf`；而 TF 发布者（`point_lio`、`sensor_scan_generation`、
+`diesel_localization`）都在根 `/tf` 上。于是监听器永远收不到帧——**D27 第 3 条只说了
+「TF 帧名不进 namespace」，漏了「tf 话题本身会被 namespace 吃掉」这一层**。
+
+Alternative（已试，**无效**）：在 Nav2 那组 `GroupAction` 里 `PushRosNamespace` 之后加
+`SetRemap(src="tf", dst="/tf")` + `SetRemap(src="tf_static", dst="/tf_static")`。
+重跑后错误一条不少（仍 346 条），查子进程命令行 `grep -c "tf:=/tf"` = **0** ——
+`launch` 的 remap 不随 `IncludeLaunchDescription` 传播进被 include 的 nav2 描述，
+子进程压根没拿到 remap 参数。这条修法「看着对」，验收时只看 launch 文件也会通过，
+所以必须留痕。
+
+Decision：新增 `scripts/tf_relay.py`（`tf_relay` 节点），把根 `/tf`、`/tf_static`
+中继到 `<robot_namespace>/tf`、`<robot_namespace>/tf_static`，随 `PushRosNamespace`
+一起放进 Nav2 组，用 `tf_relay:=false` 可关。QoS 必须与发布端一致：
+`/tf` 用 `best_effort + volatile`，`/tf_static` 用 `reliable + transient_local`
+（QoS 不匹配时 ROS 2 不报错、只静默不投递）。
+
+Reason：TF 是全局契约（帧名全局唯一），而 nav2 各节点的 tf2 监听器写死了相对名
+`tf`/`tf_static`、拿不到 remap；在「不能改上游」的前提下，唯一干净的做法是让命名空间里
+多出一个 TF 发布者。上游实机只有一个命名空间，掩盖了这件事；仿真里 Nav2 在 namespace、
+发布者在根，问题才暴露。
+
+Consequences：`test/test_navigation_sim_tf_remap.py` 静态断言「同一个 `GroupAction` 里
+既有 `PushRosNamespace`、又引用了 `tf_relay` 节点、其 `target_namespace` 引用
+`robot_namespace`，且没有 `SetRemap` 残留」，注册为 ctest `navigation_sim_tf_remap`
+（`colcon test` 即跑，不用起仿真）。
+代价：`tf` 在命名空间里会被复制一份（带宽翻倍，仿真可接受）；实机把整栈放根命名空间时
+需 `tf_relay:=false`，否则中继节点的空 `target_namespace` 保护会直接退出（`SystemExit(2)`）。
