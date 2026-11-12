@@ -188,13 +188,9 @@ def ros_endpoints(entries, context):
     endpoints = []
 
     for entry in entries:
-        topic = entry.ros_topic or render(
-            entry.gz_topic, context, entry_id=entry.entry_id
-        )
-        if entry.ros_topic is not None:
-            # 显式 ros_topic 也可能带占位符（例如按机器人名分话题），一并渲染
-            topic = render(topic, context, entry_id=entry.entry_id)
-        endpoints.append((entry.entry_id, topic, entry.direction, entry.required))
+        # 显式 ros_topic 也可能带占位符（例如按机器人名分话题），统一渲染一次
+        topic = render(entry.ros_topic or entry.gz_topic, context, entry_id=entry.id)
+        endpoints.append((entry.id, topic, entry.direction, entry.required))
 
     return endpoints
 

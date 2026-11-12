@@ -36,6 +36,7 @@ from sensor_msgs.msg import PointCloud2
 from tf2_msgs.msg import TFMessage
 from tf2_ros import Buffer, TransformListener
 
+from diesel_sim_tools import bridge as bridge_contract
 from diesel_sim_tools import profile as sim_profile
 
 # 隧道窗口、A3 目标点与真值帧名来自场地/机器人规格（config/fields、config/robots，D28）。
@@ -104,13 +105,15 @@ def lifecycle_state_name(node, service_name):
 class AcceptNode(Node):
     """一次采集/验收用的节点：只订阅，不发控制指令（a3 只发导航目标）。"""
 
-    def __init__(self, args, field, robot):
+    def __init__(self, args, field, robot, endpoints):
         super().__init__("accept")
         self.args = args
         # 真值帧名按模型名找（/sim/pose_info 的 transform 名是 <model> 或 <model>/<link>）
         self.model_name = robot.model
         # 派生导航图里隧道开放段的投影（与 map/nav2 的派生口径、test/test_nav_map.py 一致）
         self.tunnel_rect = field.tunnel_rect
+        # 桥接契约的 ROS 侧端点（README §1 A9 自检用）
+        self.endpoints = endpoints
         self.lidar_frames = 0
         self.state_msg = None
         self.state_ok_seen = False
@@ -240,8 +243,42 @@ def wait_ready(node, deadline_s):
     return False, marks, lifecycle_checked
 
 
+def contract_missing(node, timeout=3.0):
+    """A9：逐条检查契约条目在 ROS 侧有没有对端。
+
+    `gz2ros` 条目要有**发布者**（数据真的从仿真出来了），`ros2gz` 条目要有**订阅者**
+    （指令真的进了仿真）。少一条就说明那条桥没建起来或话题名对不上——症状是「整链看着
+    都在跑，但某个传感器/指令永远是空的」，比节点崩溃更难发现，所以让它在这里报出来。
+    端点表来自 config/bridge.yaml 的渲染结果，与 parameter_bridge 看到的是同一套话题名。
+    """
+    deadline = time.monotonic() + timeout
+
+    while True:
+        missing = []
+        for entry_id, topic, direction, required in node.endpoints:
+            if not required:
+                continue
+            peers = (
+                node.get_publishers_info_by_topic(topic)
+                if direction == "gz2ros"
+                else node.get_subscriptions_info_by_topic(topic)
+            )
+            if not peers:
+                missing.append((entry_id, topic, direction))
+        # 桥节点刚起来时图上可能还没发现对端，留一点重试窗口
+        if not missing or time.monotonic() >= deadline:
+            return missing
+        time.sleep(0.1)
+
+
 def cmd_ready(node, args):
     ok, marks, lifecycle_checked = wait_ready(node, args.deadline)
+    missing = contract_missing(node)
+    for entry_id, topic, direction in missing:
+        print(
+            f"FAIL 桥接契约条目 {entry_id} 在 ROS 侧没有对端：{topic}"
+            f"（{direction}；期望 {'发布者' if direction == 'gz2ros' else '订阅者'}）"
+        )
     detail = {
         "ready_delay_s": marks.get("controller_server", "timeout"),
         "lidar_s": marks.get("lidar_s", "none"),
@@ -250,8 +287,9 @@ def cmd_ready(node, args):
         "controller_server": lifecycle_checked.get("controller_server", "unknown"),
         "last_state": node.last_state or "none",
         "state_reason": node.last_reason or "none",
+        "bridge_missing": ",".join(item[0] for item in missing) or "none",
     }
-    if ok:
+    if ok and not missing:
         log_kv("ready=PASS ", **detail)
         return 0
     log_kv("ready=FAIL ", **detail)
@@ -471,6 +509,10 @@ def main(argv=None):
     share_dir = get_package_share_directory("diesel_simulation_bringup")
     field = sim_profile.load_field_named(share_dir, args.field)
     robot = sim_profile.load_robot_named(share_dir, args.robot)
+    entries = bridge_contract.load(bridge_contract.default_path(share_dir))
+    endpoints = bridge_contract.ros_endpoints(
+        entries, sim_profile.assembly_context(field, robot)
+    )
     if args.command == "a3":
         args.x = field.goal[0] if args.x is None else args.x
         args.y = field.goal[1] if args.y is None else args.y
@@ -478,7 +520,7 @@ def main(argv=None):
 
     rclpy.init(args=remove_ros_args(ros_args))
 
-    node = AcceptNode(args, field, robot)
+    node = AcceptNode(args, field, robot, endpoints)
     try:
         if args.command == "ready":
             return cmd_ready(node, args)
