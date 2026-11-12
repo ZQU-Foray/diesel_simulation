@@ -8,7 +8,7 @@
 # 与 sim_up.sh 同一条安装路径。
 #
 # 三个子命令都只打印单行 key=value，便于贴进 plan.md / decision.md 的回执：
-#   ready  等整链就绪：/livox/lidar 首帧、/localization/state 首次 pose_valid、
+#   ready  等整链就绪：/livox/lidar 首帧、<ns>/localization/state 首次 pose_valid、
 #          bt_navigator 与 controller_server 均 active
 #   a2     定位精度保持（复刻 decision.md D13 的口径）
 #   a3     Nav2 穿隧道可达：发 NavigateToPose 到隧道西侧，断言 SUCCEEDED 且轨迹采样点
@@ -122,9 +122,10 @@ class AcceptNode(Node):
         self.create_subscription(
             PointCloud2, "/livox/lidar", self._on_lidar, sensor_qos
         )
-        self.create_subscription(
-            LocalizationState, "/localization/state", self._on_state, 10
-        )
+        # 定位节点自身话题是相对名，全名由 namespace 决定（计划文档 §1.5）。
+        state_topic = f"{args.namespace.rstrip('/')}/localization/state"
+        self.state_topic = state_topic
+        self.create_subscription(LocalizationState, state_topic, self._on_state, 10)
         self.create_subscription(TFMessage, "/sim/pose_info", self._on_pose_info, 10)
 
         self.tf_buffer = Buffer()
@@ -415,6 +416,11 @@ def main(argv=None):
     argv = sys.argv if argv is None else argv
     parser = argparse.ArgumentParser(
         description="A2/A3/A6 运行时验收（判据见 README §1 与 decision.md D13/D16）"
+    )
+    parser.add_argument(
+        "--namespace",
+        default="/diesel/sentry",
+        help="定位节点所在的 ROS namespace（计划文档 §1.5，默认 /diesel/sentry）",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 

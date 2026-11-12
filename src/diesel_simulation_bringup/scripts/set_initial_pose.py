@@ -21,20 +21,23 @@ DEFAULT_TIMEOUT_SEC = 60.0
 class InitialPoseSetter(Node):
     def __init__(self) -> None:
         super().__init__("sim_set_initial_pose")
-        self.declare_parameter("service_name", "/localization/relocalize")
+        # namespace 由 launch 注入（/diesel/<robot>）；service_name 非空时优先，便于单独调试。
+        self.declare_parameter("robot_namespace", "/diesel/sentry")
+        self.declare_parameter("service_name", "")
         self.declare_parameter("x", 0.0)
         self.declare_parameter("y", 0.0)
         self.declare_parameter("yaw", 0.0)
         self.declare_parameter("startup_timeout_sec", DEFAULT_TIMEOUT_SEC)
-        self.client = self.create_client(
-            Relocalize, self.get_parameter("service_name").value
+        self.service_name = self.get_parameter("service_name").value or (
+            f"{self.get_parameter('robot_namespace').value}/localization/relocalize"
         )
+        self.client = self.create_client(Relocalize, self.service_name)
 
     def wait_and_call(self) -> bool:
         timeout = self.get_parameter("startup_timeout_sec").value
         if not self.client.wait_for_service(timeout_sec=timeout):
             self.get_logger().error(
-                f"等待服务 {self.get_parameter('service_name').value} 超时（{timeout:.0f} s）"
+                f"等待服务 {self.service_name} 超时（{timeout:.0f} s）"
             )
             return False
 

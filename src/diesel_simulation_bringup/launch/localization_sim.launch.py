@@ -56,6 +56,7 @@ def _initial_pose(context, *args, **kwargs):
                             "x": LaunchConfiguration("x"),
                             "y": LaunchConfiguration("y"),
                             "yaw": LaunchConfiguration("yaw"),
+                            "robot_namespace": LaunchConfiguration("robot_namespace"),
                         }
                     ],
                 )
@@ -66,7 +67,11 @@ def _initial_pose(context, *args, **kwargs):
 
 def generate_launch_description():
     sim_launch = PathJoinSubstitution(
-        [FindPackageShare("diesel_simulation_bringup"), "launch", "simulation.launch.py"]
+        [
+            FindPackageShare("diesel_simulation_bringup"),
+            "launch",
+            "simulation.launch.py",
+        ]
     )
     point_lio_params = PathJoinSubstitution(
         [FindPackageShare("diesel_simulation_bringup"), "config", "point_lio_sim.yaml"]
@@ -228,6 +233,7 @@ def generate_launch_description():
         package="diesel_localization_ros",
         executable="map_server_node",
         name="diesel_map_server",
+        namespace=LaunchConfiguration("robot_namespace"),
         output="screen",
         parameters=localization_params,
         condition=IfCondition(LaunchConfiguration("start_map_server")),
@@ -237,6 +243,7 @@ def generate_launch_description():
         package="diesel_localization_ros",
         executable="localization_node",
         name="diesel_localization",
+        namespace=LaunchConfiguration("robot_namespace"),
         output="screen",
         parameters=localization_params,
     )
@@ -258,6 +265,9 @@ def generate_launch_description():
             DeclareLaunchArgument("initial_pose_delay", default_value="6.0"),
             # gazebo 沉降时间：小于该值时启动 point_lio 会因 IMU 初始化带偏重力而发散。
             DeclareLaunchArgument("point_lio_delay", default_value="4.0"),
+            # ROS 运行时 namespace（foray_docs/diesel_naming_migration.md §1.5）：
+            # 定位节点自身话题是相对名，这里决定全名；TF 帧名不受 namespace 影响。
+            DeclareLaunchArgument("robot_namespace", default_value="/diesel/sentry"),
             DeclareLaunchArgument("start_map_server", default_value="true"),
             # 仿真侧健康时限（审计 L6）：默认值就是本文档实测口径，可在命令行覆盖以便
             # 复现现场阈值（例如 --odom_timeout_sec 0.5 对照实车）。节点启动时会打印

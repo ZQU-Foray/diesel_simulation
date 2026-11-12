@@ -242,6 +242,11 @@ def parse_args(argv):
         help="最长等待（秒）；到点仍无数据就按 missing 出报告",
     )
     parser.add_argument("--json", action="store_true", help="输出 JSON")
+    parser.add_argument(
+        "--namespace",
+        default="/diesel/sentry",
+        help="定位节点所在 namespace（计划文档 §1.5，默认 /diesel/sentry）",
+    )
     return parser.parse_args(argv)
 
 
@@ -251,6 +256,16 @@ def collect(args):
     from tf2_ros import Buffer, TransformListener
 
     watched = REQUIRED_TOPICS + DEBUG_TOPICS
+    # 定位节点自身话题是相对名，全名随 namespace 变（计划文档 §1.5）；
+    # 键仍用原常量，订阅用解析后的全名。
+    resolved = {
+        name: (
+            f"{args.namespace.rstrip('/')}/localization/state"
+            if name == "/localization/state"
+            else name
+        )
+        for name in watched
+    }
 
     class Collector(Node):  # 内部一次性节点
         def __init__(self):
@@ -269,7 +284,7 @@ def collect(args):
                 sensor = name in {"/livox/lidar", "/cloud_registered"}
                 qos = QoSPresetProfiles.SENSOR_DATA.value if sensor else 10
                 self.create_subscription(
-                    get_type(name), name, self._make_cb(name), qos, raw=False
+                    get_type(name), resolved[name], self._make_cb(name), qos, raw=False
                 )
 
         def _make_cb(self, name):
