@@ -134,6 +134,23 @@ def generate_launch_description():
         ],
     )
 
+    # TF 中继（D28）：nav2 的 tf2 监听器按相对名订阅，进 namespace 后读
+    # <ns>/tf(_static)，而发布者都在根 /tf ⇒ 必须有人在命名空间里「多一个发布者」。
+    # 实机无命名空间时把 robot_namespace 置空并关掉这个开关（`tf_relay:=false`）。
+    tf_relay = Node(
+        package="diesel_simulation_bringup",
+        executable="tf_relay.py",
+        name="tf_relay",
+        output="screen",
+        parameters=[
+            {
+                "use_sim_time": True,
+                "target_namespace": LaunchConfiguration("robot_namespace"),
+            }
+        ],
+        condition=IfCondition(LaunchConfiguration("tf_relay")),
+    )
+
     # Nav2 整栈进 /diesel/<robot>：humable 的 navigation_launch.py 只把 namespace 用于
     # 参数 YAML 的 root_key（参数键被改写成 /diesel/sentry/<节点>）和组合容器名，
     # **不会**给各 Node 加 namespace——所以必须在这里用 PushRosNamespace 包一层，
@@ -143,6 +160,12 @@ def generate_launch_description():
     navigation = GroupAction(
         actions=[
             PushRosNamespace(LaunchConfiguration("robot_namespace")),
+            tf_relay,
+            # Nav2 各节点的 tf2 监听器按**相对名** `tf`/`tf_static` 订阅，进 namespace 后
+            # 落到 /diesel/sentry/tf（实测 5 个订阅、0 个发布，TF 全在根 /tf 上）⇒
+            # 代价地图永远「Invalid frame ID "odom"」、bt_navigator 卡在 inactive。
+            # 在这层挂 SetRemap 不生效（remap 不随 IncludeLaunchDescription 传播，
+            # 子进程命令行没有 -r tf:=/tf），所以用中继喂命名空间（D28）。
             IncludeLaunchDescription(
                 PythonLaunchDescriptionSource(nav2_launch),
                 launch_arguments={
@@ -196,6 +219,11 @@ def generate_launch_description():
             # 定位与 Nav2 同处一个 /diesel/<robot>；上游 /livox/*、/odometry、
             # /cmd_vel、TF 帧名仍是全局的——它们是跨边界契约，不由本仓拼前缀。
             DeclareLaunchArgument("robot_namespace", default_value="/diesel/sentry"),
+            DeclareLaunchArgument(
+                "tf_relay",
+                default_value="true",
+                description="把根 /tf、/tf_static 中继进命名空间（无命名空间时关掉）",
+            ),
             DeclareLaunchArgument("start_nav2", default_value="true"),
             # 定位实测：point_lio 4 s 起、初值 6 s 注入、/localization/state 首次 OK 约 8 s；
             # 25 s 留足软件渲染下的余量（accept.py ready 会打印实际 ready_delay_s）
