@@ -23,13 +23,14 @@
 from launch import LaunchDescription
 from launch.actions import (
     DeclareLaunchArgument,
+    GroupAction,
     IncludeLaunchDescription,
     TimerAction,
 )
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
-from launch_ros.actions import Node
+from launch_ros.actions import Node, PushRosNamespace
 from launch_ros.substitutions import FindPackageShare
 
 # 与上游 pb2025_nav_bringup 仿真参数一致：点云里程计在 odom 系、雷达帧 front_mid360。
@@ -72,6 +73,7 @@ def generate_launch_description():
             "x": LaunchConfiguration("x"),
             "y": LaunchConfiguration("y"),
             "yaw": LaunchConfiguration("yaw"),
+            "robot_namespace": LaunchConfiguration("robot_namespace"),
         }.items(),
     )
 
@@ -102,6 +104,7 @@ def generate_launch_description():
         package="nav2_map_server",
         executable="map_server",
         name="map_server",
+        namespace=LaunchConfiguration("robot_namespace"),
         output="screen",
         parameters=[
             nav2_params,
@@ -118,6 +121,7 @@ def generate_launch_description():
         package="nav2_lifecycle_manager",
         executable="lifecycle_manager",
         name="lifecycle_manager_map",
+        namespace=LaunchConfiguration("robot_namespace"),
         output="screen",
         parameters=[
             {
@@ -130,15 +134,27 @@ def generate_launch_description():
         ],
     )
 
-    navigation = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(nav2_launch),
-        launch_arguments={
-            "use_sim_time": "true",
-            "params_file": nav2_params,
-            "autostart": "true",
-            "use_composition": "False",
-            "use_respawn": "False",
-        }.items(),
+    # Nav2 整栈进 /diesel/<robot>：humable 的 navigation_launch.py 只把 namespace 用于
+    # 参数 YAML 的 root_key（参数键被改写成 /diesel/sentry/<节点>）和组合容器名，
+    # **不会**给各 Node 加 namespace——所以必须在这里用 PushRosNamespace 包一层，
+    # 否则参数键与节点名对不上，Nav2 退回默认参数（实测：controller_server
+    # 报 "Couldn't load critics!"、frequency 变成默认 20 Hz）。
+    # 跨边界的 /odometry、/cmd_vel、TF 帧名在参数与桥接里显式写成绝对名。
+    navigation = GroupAction(
+        actions=[
+            PushRosNamespace(LaunchConfiguration("robot_namespace")),
+            IncludeLaunchDescription(
+                PythonLaunchDescriptionSource(nav2_launch),
+                launch_arguments={
+                    "use_sim_time": "true",
+                    "params_file": nav2_params,
+                    "autostart": "true",
+                    "use_composition": "False",
+                    "use_respawn": "False",
+                    "namespace": LaunchConfiguration("robot_namespace"),
+                }.items(),
+            ),
+        ],
         condition=IfCondition(LaunchConfiguration("start_nav2")),
     )
 
@@ -176,6 +192,10 @@ def generate_launch_description():
                 default_value="false",
                 description="开调车 rqt 面板组（graph / topic / plot / console / tf_tree / image_view）",
             ),
+            # ROS 运行时 namespace（foray_docs/diesel_naming_migration.md §1.5）：
+            # 定位与 Nav2 同处一个 /diesel/<robot>；上游 /livox/*、/odometry、
+            # /cmd_vel、TF 帧名仍是全局的——它们是跨边界契约，不由本仓拼前缀。
+            DeclareLaunchArgument("robot_namespace", default_value="/diesel/sentry"),
             DeclareLaunchArgument("start_nav2", default_value="true"),
             # 定位实测：point_lio 4 s 起、初值 6 s 注入、/localization/state 首次 OK 约 8 s；
             # 25 s 留足软件渲染下的余量（accept.py ready 会打印实际 ready_delay_s）

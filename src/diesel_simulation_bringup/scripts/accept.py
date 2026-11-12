@@ -122,8 +122,9 @@ class AcceptNode(Node):
         self.create_subscription(
             PointCloud2, "/livox/lidar", self._on_lidar, sensor_qos
         )
-        # 定位节点自身话题是相对名，全名由 namespace 决定（计划文档 §1.5）。
-        state_topic = f"{args.namespace.rstrip('/')}/localization/state"
+        # 定位与 Nav2 都用相对名，全名由 namespace 决定（计划文档 §1.5）。
+        self.namespace = args.namespace.rstrip("/")
+        state_topic = f"{self.namespace}/localization/state"
         self.state_topic = state_topic
         self.create_subscription(LocalizationState, state_topic, self._on_state, 10)
         self.create_subscription(TFMessage, "/sim/pose_info", self._on_pose_info, 10)
@@ -213,12 +214,17 @@ def wait_ready(node, deadline_s):
 
         # 生命周期查询要等节点起来，别每一轮都打服务调用
         if "bt_navigator" not in marks and "localization_s" in marks:
-            name, state_id = lifecycle_state_name(node, "/bt_navigator/get_state")
+            # Nav2 整栈在 /diesel/<robot> 下（计划文档 §1.5），lifecycle 服务随之搬家
+            name, state_id = lifecycle_state_name(
+                node, f"{node.namespace}/bt_navigator/get_state"
+            )
             lifecycle_checked["bt_navigator"] = name
             if state_id == LifecycleState.PRIMARY_STATE_ACTIVE:
                 marks["bt_navigator"] = round(elapsed, 2)
         if "controller_server" not in marks and "localization_s" in marks:
-            name, state_id = lifecycle_state_name(node, "/controller_server/get_state")
+            name, state_id = lifecycle_state_name(
+                node, f"{node.namespace}/controller_server/get_state"
+            )
             lifecycle_checked["controller_server"] = name
             if state_id == LifecycleState.PRIMARY_STATE_ACTIVE:
                 marks["controller_server"] = round(elapsed, 2)
@@ -321,7 +327,8 @@ def cmd_a3(node, args):
         )
         return 1
 
-    client = ActionClient(node, NavigateToPose, "/navigate_to_pose")
+    # 动作名同样在 namespace 里，否则 A2 会一直等不到服务器
+    client = ActionClient(node, NavigateToPose, f"{args.namespace.rstrip('/')}/navigate_to_pose")
     if not client.wait_for_server(timeout_sec=float(args.deadline)):
         log_kv("a3 ", result="NO_ACTION_SERVER", verdict="FAIL")
         return 1

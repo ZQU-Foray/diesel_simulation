@@ -23,8 +23,10 @@
 # 「VelocityControl subscribing to twist messages on [/model/diesel_sim_robot/cmd_vel]」。
 # 写成 `/diesel_sim_robot/cmd_vel` 时桥接仍会建立、日志也不报错，但仿真车永远不动——
 # 只靠 `ign topic -l` 看不出来的静默错接（decision.md D20）。
+# ROS 侧话题随 Nav2 的 namespace：整栈在 /diesel/sentry 下，velocity_smoother
+# 发布的是 /diesel/sentry/cmd_vel。改 robot_namespace 时这里要同步。
 - gz_topic: /model/diesel_sim_robot/cmd_vel
-  ros_topic: /cmd_vel
+  ros_topic: /diesel/sentry/cmd_vel
   ros_type: geometry_msgs/msg/Twist
   gz_type: ignition.msgs.Twist
   direction: ros2gz
