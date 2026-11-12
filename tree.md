@@ -102,6 +102,19 @@ diesel_simulation/
     │   │   └── rmul_2027.sdf                  #   唯一交付的世界（Fortress 口径）
     │   └── test/
     │       └── test_field_assets.py           #   资源断言：插件前缀、地图几何、网格可解析
+    ├── diesel_sim_tools/                       # 装配库：引擎调用 / 桥接契约 / profile（D28）
+    │   ├── package.xml                        #   ament_cmake + ament_python_install_package
+    │   ├── CMakeLists.txt                     #   安装 Python 包 + 3 个单测
+    │   ├── diesel_sim_tools/
+    │   │   ├── __init__.py                    #   导出 AssemblyError
+    │   │   ├── errors.py                      #   统一异常：装配输入不合法即启动失败
+    │   │   ├── engine_gz.py                   #   gz 启动参数：资源路径 / 世界 / spawn / 真值
+    │   │   ├── bridge.py                      #   桥接契约：加载、模板渲染、参数与重映射
+    │   │   └── profile.py                     #   场地与机器人规格读取 + 桥接占位符上下文
+    │   └── test/
+    │       ├── test_engine_gz.py              #   世界/spawn 参数与缺失世界报错
+    │       ├── test_bridge.py                 #   占位符缺失/残留、方向符号、契约字段校验
+    │       └── test_profile.py                #   路径解析、视场一致性、ang_bottom 口径
     └── diesel_simulation_bringup/              # 启动层：把仿真器接到本仓算法上
         ├── package.xml                        #   ament_cmake，exec_depend 上游与自研包
         ├── CMakeLists.txt                     #   安装 launch/config/rviz/models/map + scripts
