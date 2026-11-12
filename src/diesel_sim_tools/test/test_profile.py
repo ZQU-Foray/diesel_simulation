@@ -168,6 +168,36 @@ def test_assembly_context():
     print("assembly_context: 只暴露场地/机器人相关占位符 OK")
 
 
+def test_resolve_by_directory():
+    root = tempfile.mkdtemp(prefix="simprofile_")
+    _tree(root, "fields", "rmul_2027", FIELD_YAML)
+    _tree(root, "robots", "sentry", ROBOT_YAML)
+    assert profile.resolve(root, "fields") == "rmul_2027"
+    assert profile.resolve(root, "robots") == "sentry"
+    assert profile.names(root, "fields") == ["rmul_2027"]
+
+    field = profile.load_field_named(root, share_lookup=_lookup(root))
+    robot = profile.load_robot_named(root, share_lookup=_lookup(root))
+    assert field.name == "rmul_2027" and robot.name == "sentry"
+
+    _tree(root, "fields", "another", FIELD_YAML)
+    try:
+        profile.resolve(root, "fields")
+    except AssemblyError as error:
+        assert "显式指定" in str(error), error
+    else:
+        raise AssertionError("多个场地规格时必须要求显式指定")
+    assert profile.resolve(root, "fields", "another") == "another"
+
+    try:
+        profile.resolve(root, "fields", "missing")
+    except AssemblyError as error:
+        assert "没有名为" in str(error), error
+    else:
+        raise AssertionError("指定不存在的规格必须抛 AssemblyError")
+    print("resolve: 单份自动选中 / 多份必须显式 / 未知名报错 OK")
+
+
 def main():
     test_load_robot()
     test_robot_angle_mismatch_is_loud()
@@ -175,6 +205,7 @@ def main():
     test_load_field()
     test_field_validation()
     test_assembly_context()
+    test_resolve_by_directory()
     print("PASS test_profile")
 
 

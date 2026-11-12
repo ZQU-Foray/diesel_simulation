@@ -1,39 +1,67 @@
-# /clock 与实际仿真时钟对齐（use_sim_time 必需）
-- gz_topic: /clock
+# 桥接契约（decision.md D28）：装配层三份规格之一。
+#
+# 规则：
+#   - `id` 必填且唯一，是所有报错与验收自检的引用名；
+#   - `gz_topic` 是**模板**：`{world}` / `{robot}` / `{lidar_link}` / `{lidar_sensor}` /
+#     `{lidar_imu_sensor}` 由 config/fields/<field>.yaml 与 config/robots/<robot>.yaml
+#     渲染（diesel_sim_tools.bridge.render）。渲染后残留占位符即启动失败并指出 `id`；
+#   - `direction`：`gz2ros` 数据从仿真流向 ROS，`ros2gz` 相反；
+#   - `expect.required` 决定 `accept.py ready` 的契约自检（README §1 A9）是否把它算作
+#     失败项：必需条目的 ROS 话题上没有对应发布者/订阅者，就是整链不完整。
+#
+# 为什么话题要写成契约而不是随手填：gz 侧名字写错时桥接照样建立、日志不报错、
+# 车永远不动——只靠 `ign topic -l` 看不出来的静默错接（D20）。
+
+# /clock 与仿真时钟对齐（use_sim_time 必需）
+- id: clock
+  gz_topic: /clock
   ros_type: rosgraph_msgs/msg/Clock
   gz_type: ignition.msgs.Clock
   direction: gz2ros
+  expect:
+    required: true
 
 # 前向 Mid-360 点云 → point_lio / diesel_localization 消费的 /livox/lidar
-- gz_topic: /world/rmul_2027/model/diesel_sim_robot/link/front_mid360/sensor/front_mid360_lidar/scan/points
+- id: lidar_points
+  gz_topic: >-
+    /world/{world}/model/{robot}/link/{lidar_link}/sensor/{lidar_sensor}/scan/points
   ros_topic: /livox/lidar
   ros_type: sensor_msgs/msg/PointCloud2
   gz_type: ignition.msgs.PointCloudPacked
   direction: gz2ros
+  expect:
+    required: true
 
 # IMU 与点云同一坐标系（point_lio 需要时间同步的 IMU）
-- gz_topic: /world/rmul_2027/model/diesel_sim_robot/link/front_mid360/sensor/front_mid360_imu/imu
+- id: lidar_imu
+  gz_topic: /world/{world}/model/{robot}/link/{lidar_link}/sensor/{lidar_imu_sensor}/imu
   ros_topic: /livox/imu
   ros_type: sensor_msgs/msg/Imu
   gz_type: ignition.msgs.IMU
   direction: gz2ros
+  expect:
+    required: true
 
 # Nav2 速度指令 → 车体平面速度控制
 # gz 侧话题必须带 `/model/` 前缀：VelocityControl 在模型命名空间下订阅，启动日志实测为
-# 「VelocityControl subscribing to twist messages on [/model/diesel_sim_robot/cmd_vel]」。
-# 写成 `/diesel_sim_robot/cmd_vel` 时桥接仍会建立、日志也不报错，但仿真车永远不动——
-# 只靠 `ign topic -l` 看不出来的静默错接（decision.md D20）。
-# ROS 侧话题随 Nav2 的 namespace：整栈在 /diesel/sentry 下，velocity_smoother
-# 发布的是 /diesel/sentry/cmd_vel。改 robot_namespace 时这里要同步。
-- gz_topic: /model/diesel_sim_robot/cmd_vel
+# 「VelocityControl subscribing to twist messages on [/model/<robot>/cmd_vel]」。
+# ROS 侧随 Nav2 的 namespace：整栈在 /diesel/sentry 下，velocity_smoother 发布的是
+# /diesel/sentry/cmd_vel（D27 只把这条钉成绝对名）。改 robot_namespace 时这里要同步。
+- id: cmd_vel
+  gz_topic: /model/{robot}/cmd_vel
   ros_topic: /diesel/sentry/cmd_vel
   ros_type: geometry_msgs/msg/Twist
   gz_type: ignition.msgs.Twist
   direction: ros2gz
+  expect:
+    required: true
 
-# 车体位姿（仿真真值，仅用于对照与调试，不参与定位）
-- gz_topic: /world/rmul_2027/pose/info
+# 车体位姿（仿真真值，仅用于对照与调试，不参与定位；A2/A3 的误差基准）
+- id: ground_truth
+  gz_topic: /world/{world}/pose/info
   ros_topic: /sim/pose_info
   ros_type: tf2_msgs/msg/TFMessage
   gz_type: ignition.msgs.Pose_V
   direction: gz2ros
+  expect:
+    required: true

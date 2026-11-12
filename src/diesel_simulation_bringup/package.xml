@@ -18,6 +18,7 @@
     <exec_depend>ros_gz_sim</exec_depend>
     <exec_depend>ros_gz_bridge</exec_depend>
     <exec_depend>diesel_rmul_2027_field</exec_depend>
+    <exec_depend>diesel_sim_tools</exec_depend>
     <exec_depend>diesel_localization_ros</exec_depend>
     <exec_depend>diesel_localization_bringup</exec_depend>
     <exec_depend>point_lio</exec_depend>

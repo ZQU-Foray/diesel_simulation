@@ -22,6 +22,9 @@ from .errors import AssemblyError
 # 所以校验时要求 6 个分量齐全、可解析成浮点。
 _POSE_COMPONENTS = 6
 
+# 规格类别 → 中文名。目录名即 launch 里 `field:=` / `robot:=` 的取值来源。
+_KINDS = {"fields": "场地规格", "robots": "机器人规格"}
+
 # 雷达垂直角分辨率与视场的一致性容差：32 线、-7°…+52°（跨度 59°）对应 59/31。
 _ANGLE_TOLERANCE = 1e-9
 
@@ -318,6 +321,58 @@ def load_field(path, *, share_lookup=None):
         ),
         tunnel_rect=tuple(float(value) for value in rect),
     )
+
+
+def names(share_dir, kind):
+    """列出某类规格的可用名字（`config/fields` 或 `config/robots` 下的文件名）。"""
+    if kind not in _KINDS:
+        raise AssemblyError(f"未知的规格类别：{kind!r}；只有 {', '.join(_KINDS)}")
+    directory = os.path.join(share_dir, "config", kind)
+    if not os.path.isdir(directory):
+        raise AssemblyError(f"规格目录不存在：{directory}")
+    found = sorted(
+        name[: -len(".yaml")]
+        for name in os.listdir(directory)
+        if name.endswith(".yaml") and os.path.isfile(os.path.join(directory, name))
+    )
+    if not found:
+        raise AssemblyError(f"规格目录为空：{directory}")
+    return found
+
+
+def resolve(share_dir, kind, requested=""):
+    """确定要用哪份规格。
+
+    目录就是注册表：只有一份时直接用它（launch 因此不必写字面量），有多份时必须显式
+    指定——猜错场地比启动失败更贵。
+    """
+    found = names(share_dir, kind)
+    if requested:
+        if requested not in found:
+            raise AssemblyError(
+                f"没有名为 `{requested}` 的{_KINDS[kind]}；可用：{', '.join(found)}"
+            )
+        return requested
+    if len(found) == 1:
+        return found[0]
+    raise AssemblyError(
+        f"{_KINDS[kind]}有 {len(found)} 份（{', '.join(found)}），"
+        f"必须在 launch 参数里显式指定"
+    )
+
+
+def load_field_named(share_dir, requested="", *, share_lookup=None):
+    """按名字（或目录里唯一的那份）读场地规格。"""
+    name = resolve(share_dir, "fields", requested)
+    path = os.path.join(share_dir, "config", "fields", f"{name}.yaml")
+    return load_field(path, share_lookup=share_lookup)
+
+
+def load_robot_named(share_dir, requested="", *, share_lookup=None):
+    """按名字（或目录里唯一的那份）读机器人规格。"""
+    name = resolve(share_dir, "robots", requested)
+    path = os.path.join(share_dir, "config", "robots", f"{name}.yaml")
+    return load_robot(path, share_lookup=share_lookup)
 
 
 def assembly_context(field, robot):
