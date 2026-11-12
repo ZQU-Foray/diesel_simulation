@@ -5,6 +5,22 @@
 
 ## 当前断点（2026-11-11）
 
+## M11 联调缺陷整改（2026-11-12，分支 `fix/m11-body-tf`）
+
+`foray_localization/plan.md` M11 的仿真侧三项已落地并取证，本 PR（#6 → `dev`）：
+
+- **L1/L2**：`localization_sim.launch.py` 补 `base_footprint → body` 恒等静态 TF（D25），
+  父方向不可反；新增静态 AST 用例 `test/test_localization_sim_launch.py` 并注册进 ctest，
+  `body_tf:=false` 保留为故障注入开关。
+- **L6/L7**：三项时限提成 `DeclareLaunchArgument`（默认 2.0/2.5/5.0）；`fov_horizontal_deg`
+  覆盖 360°（实车 30° 会把 60000 点裁到 ~5000，再经 0.10 m 体素塌到 64~70 点）；`profile_enabled` 提成参数。
+- **L8**：`accept.py` 输出 `state_reason`。
+
+回执（宿主直跑，本仓自带 install）：`ready=PASS ready_delay_s=0.93 last_state=OK state_reason="warmup complete"`、
+`a2 lost=0 max_xy_err=0.039 verdict=PASS`（整改前 `lost=5571 verdict=FAIL`）、
+漏斗 `raw=18818 crop=18818 voxel=3197 align_source=1697 align_target=4137`、
+`body_tf:=false` 时 `last_state=LOST reason="tf unavailable: ..."`。
+
 **I1–I6、I9 完成（A2 已在仿真里取证通过、仓级门禁已接入），I7 代码与文档完成但
 运行时判定被外部阻塞，I8 / I10 未做。M5 调车可视化（I11–I16）里 I11 / I12 / I13 / I15
 已完成代码与门禁（`tune.rviz` + `rviz_config` 参数、Gazebo GUI 四面板、`tune_rqt.sh`
