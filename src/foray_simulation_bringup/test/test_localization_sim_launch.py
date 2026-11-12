@@ -34,9 +34,12 @@ def _calls(tree, func_name):
     found = []
 
     for node in ast.walk(tree):
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
-            if node.func.id == func_name:
-                found.append(node)
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == func_name
+        ):
+            found.append(node)
 
     return found
 
