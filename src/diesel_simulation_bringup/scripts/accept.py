@@ -328,7 +328,9 @@ def cmd_a3(node, args):
         return 1
 
     # 动作名同样在 namespace 里，否则 A2 会一直等不到服务器
-    client = ActionClient(node, NavigateToPose, f"{args.namespace.rstrip('/')}/navigate_to_pose")
+    client = ActionClient(
+        node, NavigateToPose, f"{args.namespace.rstrip('/')}/navigate_to_pose"
+    )
     if not client.wait_for_server(timeout_sec=float(args.deadline)):
         log_kv("a3 ", result="NO_ACTION_SERVER", verdict="FAIL")
         return 1
