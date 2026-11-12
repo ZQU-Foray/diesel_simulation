@@ -53,8 +53,19 @@ TRACE_HZ = 5.0
 
 
 def log_kv(prefix="", **fields):
-    """单行 key=value 输出。"""
-    body = " ".join(f"{key}={value}" for key, value in fields.items())
+    """单行 key=value 输出。
+
+    值里含空格时加引号：`reason` 这类字段本身就是一句话（`map unavailable: manifest
+    missing`），不加引号会把后面每个单词都变成看起来像 key 的碎片，读日志时更难判断。
+    """
+    body = " ".join(
+        (
+            f'{key}="{value}"'
+            if isinstance(value, str) and " " in value
+            else f"{key}={value}"
+        )
+        for key, value in fields.items()
+    )
     print(f"{prefix}{body}".strip(), flush=True)
 
 
@@ -99,6 +110,7 @@ class AcceptNode(Node):
         self.state_msg = None
         self.state_ok_seen = False
         self.last_state = None
+        self.last_reason = ""
         self.truth = None
         self.truth_frame = None
 
@@ -130,6 +142,10 @@ class AcceptNode(Node):
             LocalizationState.STATE_LOST: "LOST",
         }
         self.last_state = names.get(msg.state, str(msg.state))
+        # 只印状态数字时，现场看到的永远是「last_state=LOST」而不知道 LOST 的成因
+        # （地图没加载、TF 查不到、配准没对应、里程计断流都长一个样）。审计 L8 就是这么
+        # 卡住的：最后靠翻 localization_node 日志才发现缺的是 body 帧。
+        self.last_reason = getattr(msg, "reason", "") or ""
         if msg.state == LocalizationState.STATE_OK and msg.pose_valid:
             self.state_ok_seen = True
 
@@ -221,6 +237,7 @@ def cmd_ready(node, args):
         "bt_navigator": lifecycle_checked.get("bt_navigator", "unknown"),
         "controller_server": lifecycle_checked.get("controller_server", "unknown"),
         "last_state": node.last_state or "none",
+        "state_reason": node.last_reason or "none",
     }
     if ok:
         log_kv("ready=PASS ", **detail)
