@@ -21,7 +21,11 @@ import ast
 import pathlib
 import sys
 
-LAUNCH = pathlib.Path(__file__).resolve().parents[1] / "launch" / "localization_sim.launch.py"
+LAUNCH = (
+    pathlib.Path(__file__).resolve().parents[1]
+    / "launch"
+    / "localization_sim.launch.py"
+)
 
 BASE_FRAME = "base_footprint"
 BODY_FRAME = "body"
@@ -90,7 +94,9 @@ def _frames(call):
         flag = tokens[index][0]
 
         if flag in ("--frame-id", "--child-frame-id"):
-            frames[flag] = tokens[index + 1] if index + 1 < len(tokens) else (None, "<缺失>")
+            frames[flag] = (
+                tokens[index + 1] if index + 1 < len(tokens) else (None, "<缺失>")
+            )
             index += 2
         else:
             index += 1
@@ -117,7 +123,11 @@ def check(launch_path):
     tree = ast.parse(launch_path.read_text(encoding="utf-8"), filename=str(launch_path))
     problems = []
 
-    static_tfs = [call for call in _calls(tree, "Node") if _literal(call, "executable") == TF_EXECUTABLE]
+    static_tfs = [
+        call
+        for call in _calls(tree, "Node")
+        if _literal(call, "executable") == TF_EXECUTABLE
+    ]
     body_nodes = [call for call in static_tfs if _literal(call, "name") == TF_NODE_NAME]
 
     if not body_nodes:
@@ -138,13 +148,19 @@ def check(launch_path):
         child = frames.get("--child-frame-id", (None, "<缺失>"))
 
         if parent[0] is not None and parent[0] != BASE_FRAME:
-            problems.append(f"{TF_NODE_NAME} 的父帧是 {parent[1]}，必须是 {BASE_FRAME!r}（方向不可反，D25）")
+            problems.append(
+                f"{TF_NODE_NAME} 的父帧是 {parent[1]}，必须是 {BASE_FRAME!r}（方向不可反，D25）"
+            )
 
         if child[0] is not None and child[0] != BODY_FRAME:
-            problems.append(f"{TF_NODE_NAME} 的子帧是 {child[1]}，必须是 {BODY_FRAME!r}（point_lio 硬编码，D56）")
+            problems.append(
+                f"{TF_NODE_NAME} 的子帧是 {child[1]}，必须是 {BODY_FRAME!r}（point_lio 硬编码，D56）"
+            )
 
         if not _in_launch_description(tree, "body_tf"):
-            problems.append("body_tf 定义了但没有放进 LaunchDescription，起链时不会启动")
+            problems.append(
+                "body_tf 定义了但没有放进 LaunchDescription，起链时不会启动"
+            )
 
     for call in static_tfs:
         if _literal(call, "name") == TF_NODE_NAME:
@@ -171,9 +187,11 @@ def main():
     if problems:
         return 1
 
-    print(f"PASS {LAUNCH.name}：{TF_NODE_NAME} 发布 {BASE_FRAME} -> {BODY_FRAME}，"
-          f"{len(_calls(ast.parse(LAUNCH.read_text(encoding='utf-8')), 'Node'))} 个 Node 中无第二条以 "
-          f"{BODY_FRAME} 为父的静态 TF")
+    print(
+        f"PASS {LAUNCH.name}：{TF_NODE_NAME} 发布 {BASE_FRAME} -> {BODY_FRAME}，"
+        f"{len(_calls(ast.parse(LAUNCH.read_text(encoding='utf-8')), 'Node'))} 个 Node 中无第二条以 "
+        f"{BODY_FRAME} 为父的静态 TF"
+    )
 
     return 0
 

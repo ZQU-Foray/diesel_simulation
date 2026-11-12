@@ -59,7 +59,11 @@ def log_kv(prefix="", **fields):
     missing`），不加引号会把后面每个单词都变成看起来像 key 的碎片，读日志时更难判断。
     """
     body = " ".join(
-        f'{key}="{value}"' if isinstance(value, str) and " " in value else f"{key}={value}"
+        (
+            f'{key}="{value}"'
+            if isinstance(value, str) and " " in value
+            else f"{key}={value}"
+        )
         for key, value in fields.items()
     )
     print(f"{prefix}{body}".strip(), flush=True)
