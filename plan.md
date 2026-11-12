@@ -46,6 +46,32 @@ I9（组织规则同步）见 D14/D15；许可证见 D19。
 > **工作方式（2026-11-11 起）**：本仓任何编辑都先开功能分支（`feat/` `fix/` `docs/`），
 > 再以 **PR 合入 `dev`**；不在 `dev` 上直接提交。`main` 只接受来自 `dev` 的稳定版本。
 
+## M12 仿真点云稠密度整改（2026-11-12，分支 `fix/m12-cloud-density`）
+
+承接 M11 的 L7「配准无有效对应」：`source` 侧点数不足是主因，改 `point_lio_sim.yaml`
+两处下采样口径（D26）：
+
+- `point_filter_num: 8 → 3`、`filter_size_surf: 0.2 → 0.1`，`filter_size_map` 保持 `0.2`。
+
+回执（本机 GPU、headless、干净 `ROS_DOMAIN_ID`）：
+
+| 指标 | 整改前 | 整改后 |
+|---|---|---|
+| `/cloud_registered` | 572 点 | 1352 点 |
+| `GICP 无有效对应` | 每 2 s 一条 | 0 条 |
+| 配准退化 | 5/6 方向不可观，condition≈1e10 | 2/6，condition≈3.3e3 |
+| `accept.py ready` | FAIL / LOST | PASS / `warmup complete` |
+| `accept.py a2` | FAIL `lost=5571` | **PASS** `max_xy_err=0.035`、`lost=0` |
+
+**未解**：`accept.py a3` 仍 `ABORTED`（`path_len_m=356`、`max_xy_err=262`），
+期间 `/aft_mapped_to_init` 跑到 `x=511 y=-639` —— 运动状态下 point_lio 发散；
+另有一次冷启动 `52` 条 `GICP 无有效对应` 后不自恢复（首次配准失败无重试路径）。
+两项均未在本分支处理。
+
+> **验证纪律（2026-11-12 补）**：一次只跑一条链，每轮换新的 `ROS_DOMAIN_ID`。
+> `pkill` 在新的 PID 命名空间里杀不到上一轮进程，旧链会与新链同时发 `/clock`，
+> 把 RTF 量成 2.4（真值 1.000），据此得出的「积压/飞车」结论全是伪影。
+
 ## M1 场地资产（A0 / A5 的一半）
 
 - [x] **I1 迁移包落盘与自检**：解包 70 文件、`verify_package.py` → `PASS: 69 package files verified`、

@@ -12,9 +12,18 @@ point_lio:
     prop_at_freq_of_imu: True
     check_satu: True
     init_map_size: 10
-    point_filter_num: 8
+    # 上游按 32 线机械雷达（每帧数万点）设的 8，仿真雷达每帧只有约 1 万个
+    # 有效回波（60000 条射线里仅 16.6% 命中，见 D26 的实测），再每 8 点抽 1 点
+    # 会让配准源点降到不足 1300 点，GICP 找不到对应。
+    # 取 3 而不取 1：全量入 ikd-tree 会让单帧负担翻 8 倍，那一轮观测到的位姿发散
+    # 读数混了另一条链的时钟（见 D26 的测量纪律），没有干净复测，故先按「加点到
+    # 够用」而非「全量」推进；要放开到 1 需单独一轮对照。
+    point_filter_num: 3
     space_down_sample: True
-    filter_size_surf: 0.2
+    # 同理：0.2 m 体素在 7 m 见方的场地里把墙面抽稀成几百点；0.1 m 兼顾点数
+    # 与计算量。filter_size_map 保持 0.2 —— 它决定全局地图密度，改小对内存与
+    # 单帧耗时的影响远大于 surface 体素。
+    filter_size_surf: 0.1
     filter_size_map: 0.2
     ivox_nearby_type: 18
     runtime_pos_log_enable: False
