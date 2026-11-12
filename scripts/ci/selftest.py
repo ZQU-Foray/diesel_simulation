@@ -16,7 +16,7 @@
        - tree.md 少一行        → doc-sync
        - tree.md 多一个文件    → doc-sync（未登记）
        - 删掉已登记的文件      → doc-sync（虚构条目）
-       - .foray-layer 反向依赖 → layer-check
+       - .diesel-layer 反向依赖 → layer-check
 
 用法：
     python3 scripts/ci/selftest.py          # 全部通过 exit 0，否则 exit 1
@@ -54,7 +54,7 @@ GATES = {
 TEXT_TARGET = "README.md"
 # tree.md 的目录树行只写文件名，所以用文件名匹配（唯一即够）。
 TREE_TARGET_MISSING = "test_manifest.py"
-UNTRACKED_EXTRA = "src/foray_simulation_bringup/scripts/zz_selftest_probe.py"
+UNTRACKED_EXTRA = "src/diesel_simulation_bringup/scripts/zz_selftest_probe.py"
 
 
 def run_git(repo: Path, *args: str) -> None:
@@ -117,13 +117,13 @@ def inject_untracked_file(repo: Path) -> None:
 
 
 def inject_deleted_file(repo: Path) -> None:
-    target = repo / "src/foray_simulation_bringup/test" / TREE_TARGET_MISSING
+    target = repo / "src/diesel_simulation_bringup/test" / TREE_TARGET_MISSING
     target.unlink()
     run_git(repo, "commit", "-aqm", "inject: deleted file")
 
 
 def inject_layer_reverse(repo: Path) -> None:
-    layer_file = repo / ".foray-layer"
+    layer_file = repo / ".diesel-layer"
     layer_file.write_text(
         "# 自检注入：L1 反向依赖 L5（L(n) 不得依赖 L(>n)）\n"
         "layer: L1\n"
@@ -145,7 +145,7 @@ CASES: list[tuple[str, str, Callable[[Path], None]]] = [
 def main() -> int:
     """跑基线 + 每条注入用例，返回进程退出码。"""
     failures = 0
-    with tempfile.TemporaryDirectory(prefix="foray-gate-selftest-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="diesel-gate-selftest-") as tmp:
         workdir = Path(tmp)
         for name, gate, inject in CASES:
             copy = make_repo_copy(workdir)

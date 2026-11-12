@@ -5,9 +5,29 @@
 
 ## 当前断点（2026-11-11）
 
+## M12 ROS 运行时 namespace 统一（2026-11-12，分支 `feat/nav2-namespace`）
+
+上游决策见 `diesel_localization` D61 与 `decision.md` D27。
+
+- [x] 定位侧在本仓落地：`robot_namespace` launch 参数（默认 `/diesel/sentry`），
+      `diesel_localization`、`diesel_map_server` 加 `namespace=`。
+- [x] Nav2 整栈进同一命名空间：`PushRosNamespace` 包住 include，节点实测
+      `/diesel/sentry/{bt_navigator,controller_server,velocity_smoother,...}`，
+      `controller_server` 打印 `Activating controller: FollowPath of type
+      regulated_pure_pursuit_controller::OmniPidPursuitController`（参数命中）。
+- [x] 参数 YAML 在命名空间下重写：`RewrittenYaml(root_key=...)`，修复「兵种参数
+      被静默丢弃」——修后启动行打印 `min_source_points=100 max_unobservable_dofs=3
+      observability_ratio=0.050`（此前是代码默认的 `0/6/0.000`）。
+- [x] 跨边界话题显式绝对名：`nav2_params_sim.yaml` 的 `odom_topic` 三处改
+      `/odometry`，`bridge.yaml` 的 `ros_topic` 改 `/diesel/sentry/cmd_vel`；
+      桥的 `gz_topic` 仍是 `/model/diesel_sim_robot/cmd_vel`。
+- [x] `accept.py` 支持命名空间：生命周期探针与 `NavigateToPose` 走 `<ns>/...`。
+- [ ] 起链回执：当前工作区自编栈仍有 `4/6 不可观` → LOST（见 D27「已知未决」），
+      待点云变稀的原因查清后再取 `ready=PASS` 回执。
+
 ## M11 联调缺陷整改（2026-11-12，分支 `fix/m11-body-tf`）
 
-`foray_localization/plan.md` M11 的仿真侧三项已落地并取证，本 PR（#6 → `dev`）：
+`diesel_localization/plan.md` M11 的仿真侧三项已落地并取证，本 PR（#6 → `dev`）：
 
 - **L1/L2**：`localization_sim.launch.py` 补 `base_footprint → body` 恒等静态 TF（D25），
   父方向不可反；新增静态 AST 用例 `test/test_localization_sim_launch.py` 并注册进 ctest，
@@ -25,7 +45,7 @@
 运行时判定被外部阻塞，I8 / I10 未做。M5 调车可视化（I11–I16）里 I11 / I12 / I13 / I15
 已完成代码与门禁（`tune.rviz` + `rviz_config` 参数、Gazebo GUI 四面板、`tune_rqt.sh`
 面板组、`tune_report.py` 健康快照），**开窗与真实频率回执仍待容器补跑**；
-I16 可选未做，I14 阻塞在 `foray_interfaces` 的相机契约。**
+I16 可选未做，I14 阻塞在 `diesel_interfaces` 的相机契约。**
 上述工作全部落在 `feat/i7-nav-a6`，并已**合并进 `dev`**：**PR #3 已 MERGED**
 （合并提交 `99a07ae`，CI 八项全绿、`MERGEABLE/CLEAN`，base 按 AGENTS.md 为 `dev`，
 原本直指 `main` 已纠正）。
@@ -40,7 +60,7 @@ I16 可选未做，I14 阻塞在 `foray_interfaces` 的相机契约。**
 I6 的三处根因与取证见 `decision.md` D11/D12/D13；D9 的「回调从未被调用」已更正。
 I7（导航装配、派生栅格、验收脚本、`cmd_vel` 桥接修正）见 D16/D17/D18/D20；
 I9（组织规则同步）见 D14/D15；许可证见 D19。
-**A3/A6 的运行时判定被 `foray_localization` 的 GICP 后端阻塞**，
+**A3/A6 的运行时判定被 `diesel_localization` 的 GICP 后端阻塞**，
 取证与待办见下方「阻塞与待确认」与 I10。
 
 > **工作方式（2026-11-11 起）**：本仓任何编辑都先开功能分支（`feat/` `fix/` `docs/`），
@@ -77,8 +97,8 @@ I9（组织规则同步）见 D14/D15；许可证见 D19。
 - [x] **I1 迁移包落盘与自检**：解包 70 文件、`verify_package.py` → `PASS: 69 package files verified`、
       `tools/test_rmul_field.py` → 5 tests OK。
 - [x] **I2 新仓骨架与文档**：`README.md` / `AGENTS.md` / `tree.md` / `plan.md` / `decision.md` /
-      `THIRD_PARTY_NOTICES.md` / `.foray-layer`(META) / `.gitignore`。
-- [x] **I3 场地资产移植**：`src/foray_rmul_2027_field` 成形；世界改为 Fortress 口径
+      `THIRD_PARTY_NOTICES.md` / `.diesel-layer`(META) / `.gitignore`。
+- [x] **I3 场地资产移植**：`src/diesel_rmul_2027_field` 成形；世界改为 Fortress 口径
       （`ignition-gazebo-*` 四插件 + `sensors` 带 `ogre2` + 自带 `directional` 光），容器内
       `ign model --list` 见 `rmul_2027`、话题 `/clock` 正常、日志无错误；
       `test/test_field_assets.py` 在 `colcon test` 里通过。
@@ -91,13 +111,13 @@ I9（组织规则同步）见 D14/D15；许可证见 D19。
       grid sha256 `cbc170a5…31801`）；
       `test/test_pcd_align.py` → **IoU 0.9331**（门槛 0.90）；
       `test/test_manifest.py` → PASS；
-      容器内用真实 `foray_localization` 验证：正例 `地图版本 1.0.0，102433 点，栅格 512x352`，
+      容器内用真实 `diesel_localization` 验证：正例 `地图版本 1.0.0，102433 点，栅格 512x352`，
       篡改 1 字节后 `栅格 sha256 不匹配`。
 
 ## M3 机器人 / 桥 / 点云时序（A1）
 
 - [x] **I5 机器人模型、桥、点云时序**（代码与 A1 取证完成）：
-      - `models/foray_sim_robot/model.sdf`：`base_footprint` + `chassis` + `front_mid360`，
+      - `models/diesel_sim_robot/model.sdf`：`base_footprint` + `chassis` + `front_mid360`，
         `gpu_lidar`（1875×32、-7°…+52°、`update_rate` 10）+ `imu`（200 Hz），
         平面运动用 `ignition-gazebo-velocity-control-system`（不建轮系）。
       - `config/bridge.yaml`：`/clock`、`/livox/lidar`、`/livox/imu`、`/cmd_vel`、`/sim/pose_info`。
@@ -124,7 +144,7 @@ I9（组织规则同步）见 D14/D15；许可证见 D19。
       `sensor_scan_generation` 补 `odom→base_footprint`，再 TimerAction 起 map_server 与
       `nav2_bringup/navigation_launch.py`）；`scripts/sim_up.sh` 默认起整链；
       `scripts/accept.py` 三条子命令（`ready` / `a2` / `a3`）；
-      `config/bridge.yaml` 的 `cmd_vel` gz 侧话题改为 `/model/foray_sim_robot/cmd_vel`
+      `config/bridge.yaml` 的 `cmd_vel` gz 侧话题改为 `/model/diesel_sim_robot/cmd_vel`
       （D20：错接时桥接日志与 `ros2 topic pub` 都正常、车却不动；改后 0.5 m/s 发 9 s，
       真值 x 由 6.0 变 7.35）。
       回执（代码级，2026-10-30）：`colcon test` 3/3（`manifest_consistency` / `pcd_align` / `nav_map`）、
@@ -132,11 +152,11 @@ I9（组织规则同步）见 D14/D15；许可证见 D19。
       整链起后 `map_server` 成功加载派生图并激活、`lifecycle_manager_navigation` 把
       controller/planner/behavior/bt_navigator/waypoint_follower/velocity_smoother 全部激活、
       `/odometry` 2.2 Hz（说明 `loam_interface`→`sensor_scan_generation` 接线生效）。
-      回执（2026-11-02，`foray_sim:humble-fortress` 容器内独立复跑）：`colcon build` 2 包通过、
+      回执（2026-11-02，`diesel_sim:humble-fortress` 容器内独立复跑）：`colcon build` 2 包通过、
       `colcon test` 4 个测试 0 failures（bringup 3 + field 的 `test_field_assets`）、
       `scripts/ci` 三门禁与 `selftest.py` 全绿、`ruff check` / `black --check` 0 待改、
       `tree.md` 与仓库 100 文件 / 31 目录双向一致。
-      **未完成**：`accept.py ready` 仍是 `localization_s=none`，因为 `foray_localization`
+      **未完成**：`accept.py ready` 仍是 `localization_s=none`，因为 `diesel_localization`
       在本次会话期间切到 PCL GICP 后端且无法收敛（见 I10），A3/A6 的正式判定要等它修好。
 - [x] **I9 组织规则同步（D14/D15）**：补齐 `CODEOWNERS`、`.clang-format`、`pyproject.toml`、
       `.github/workflows/ci.yml` 与 `scripts/ci/{check_style,check_tree_doc,check_layer}.py`；
@@ -144,19 +164,19 @@ I9（组织规则同步）见 D14/D15；许可证见 D19。
       （91 文件 / 30 目录）。回执：三条门禁全绿、`ruff check` 0 问题、`black --check` 0 待改。
       后续：`gate-selftest` 已在 I7 补上（D18）；`foray_docs` 的仓表与 scope 词表尚未收录本仓。
 - [ ] **I10**：解除 A3/A6 判定阻塞（外部仓 GICP，见「阻塞与待确认」）。
-- [ ] **I8**：跨仓收尾——`foray_ws/.repos` 增 `foray_simulation`，`foray_docs`
-      §6.6 加 scope 词表、`repository_structure.md` 补仓列表，`foray_localization/decision.md`
+- [ ] **I8**：跨仓收尾——`diesel_ws/.repos` 增 `diesel_simulation`，`foray_docs`
+      §6.6 加 scope 词表、`repository_structure.md` 补仓列表，`diesel_localization/decision.md`
       的 D17 一并提交。
 - [ ] **I11–I16（M5 调车可视化）**：I11 / I12 / I13 / I15 代码与门禁完成（开窗与真实频率回执
         待容器），I16 可选未做、I14 阻塞在相机契约，
       逐项清单见下节
-      `## M5 调车可视化`；其中 I14 会新增对外话题，须先由 `foray_interfaces` 定契约。
+      `## M5 调车可视化`；其中 I14 会新增对外话题，须先由 `diesel_interfaces` 定契约。
 
 ## M5 调车可视化（调试支撑，不改 A0–A7 验收口径）
 
 > 目的：在容器里调车时每一环都有窗口可看，不必退回 `ros2 topic echo` 手工盯。
 > 口径：本节是**工程支撑**（与 I9 同类），不是 `README.md` 的新需求；I14 会新增对外话题，
-> 必须先由 `foray_interfaces` 定契约、再回 `README.md` 立需求。
+> 必须先由 `diesel_interfaces` 定契约、再回 `README.md` 立需求。
 
 现状（2026-11-11 勘察）：能给的窗口只有两个——Gazebo GUI（`config/gui.config` 里只有
 `MinimalScene` + `GzSceneManager`，纯 3D 场景）和 RViz2（`rviz/sim.rviz` 只有 `TF` /
@@ -208,7 +228,7 @@ I9（组织规则同步）见 D14/D15；许可证见 D19。
 - [ ] **I14 相机 / 图像链路（接口决策点，不阻塞 I11–I13）**：要在窗口里看点云以外的画面，
       需 `model.sdf` 加 `camera` 传感器、`bridge.yaml` 加 `/camera/image_raw` 桥、RViz 加
       `Image` 显示。这是**新增对外话题**，超出 `README.md` 现有 A0–A7，按「README 是唯一
-      需求源」必须先由 `foray_interfaces` 定契约（话题名、编码、`camera_info` 口径）再回
+      需求源」必须先由 `diesel_interfaces` 定契约（话题名、编码、`camera_info` 口径）再回
       README 立需求；在此之前只规划、不动手。
 - [ ] **I15 话题健康快照**（`scripts/tune_report.py`）：把调车时反复手打的命令收成一个——
       关键话题实测频率与帧间隔、`/localization/state` 的健康字段（`accept.py` 已订阅该契约）、
@@ -258,12 +278,12 @@ I9（组织规则同步）见 D14/D15；许可证见 D19。
 - `scripts/ci/{check_style,check_tree_doc,check_layer}.py` 三门全绿（本分支 100 文件 / 31 目录）；
 - `scripts/ci/selftest.py` → 5 条注入全部被拦下，干净副本三门全绿；
 - `test_pcd_align.py` 复算 **IoU 0.9331**（召回 0.9777 / 精确 0.9534）、`test_manifest.py` PASS；
-- `ros2 pkg executables foray_simulation_bringup` → 6 个可执行体（含 `accept.py`、`make_nav_map.py`）。
+- `ros2 pkg executables diesel_simulation_bringup` → 6 个可执行体（含 `accept.py`、`make_nav_map.py`）。
 
 **本轮复核不了的项**（宿主未装 `docker`；`/opt/ros/humble` 下无 `nav2*` / `ros_gz*` /
 `point_lio`；`pip` 缺失）：
 
-- A0/A1/A2/A3/A6 的运行时回执只能在 `foray_sim:humble-fortress` 容器里重跑；
+- A0/A1/A2/A3/A6 的运行时回执只能在 `diesel_sim:humble-fortress` 容器里重跑；
 - `ruff check` / `black --check` 的回执本轮未能独立复验，仍由 CI 的 `lint-python` 作业守。
 
 ## 阻塞与待确认
@@ -274,7 +294,7 @@ I9（组织规则同步）见 D14/D15；许可证见 D19。
   实测最坏帧间隔（p99 1.01 s、最长 1.60 s）留的余量；若换到更快的机器可再收紧。
 - **A2 整链门有已知脆弱点**：残留的上一轮 `ign_sim_pointcloud_tool` 进程 + 宿主高负载
   会让它误判成 LOST（D15 有实测）。重跑前先 `ps` 确认容器干净，必要时 `docker restart`。
-- **I10（新，阻塞 A3/A6 判定）**：2026-10-30 12:03 起 `foray_localization` 分支
+- **I10（新，阻塞 A3/A6 判定）**：2026-10-30 12:03 起 `diesel_localization` 分支
   `feat/pcl-gicp-aligner` 的提交 `5234023` 把配准后端换成 PCL GICP，容器内镜像也已被
   并行会话重建。实测该后端在本场地**不收敛**：
   - 真值位姿 (6.0, 4.0) 下对 0.25 m 体素先验图的最近邻残差 `mean=0.1069 m`、
@@ -285,7 +305,7 @@ I9（组织规则同步）见 D14/D15；许可证见 D19。
     后，`/localization/state` 仍是 `state: 3`（LOST）、`reason: initialization timeout`；
   - 同条件下 `point_lio` 只有 1.3 Hz（`/livox/lidar` 6.7 Hz），GICP 常驻 41% CPU，
     宿主 load 41 / 12 核导致 RTF 塌陷，也会单独触发 `odom_timeout_sec`。
-  结论：**这不是本仓能修的问题**（本仓只装配），需 `foray_localization` 侧把 GICP 的
+  结论：**这不是本仓能修的问题**（本仓只装配），需 `diesel_localization` 侧把 GICP 的
   质量口径与 0.25 m 体素地图对齐、或恢复可用后端；修好后在本仓执行
   `accept.py ready --deadline 300` + `accept.py a3 --x 2.0 --y 7.4` 即可补上 A3/A6 回执。
 - **A1 的 IMU 口径被改动且无留痕（待确认）**：本分支 `README.md` §1 把 A1 里
@@ -293,27 +313,27 @@ I9（组织规则同步）见 D14/D15；许可证见 D19。
   156 Hz）」。`README.md` 是唯一需求源，改口径属需求变更，但 `decision.md` 没有对应条目、
   仓内也找不到 156 Hz 的实测回执，本机（无仿真环境）无法复核。处理方式二选一：
   补一条 decision 条目 + 容器内 `ros2 topic hz /livox/imu` 回执，或恢复原文措辞。
-- **开发副本路径（2026-11-11 更正）**：日常开发副本是 **`~/Projects/foray_simulation`**
-  （不是此前写的 `~/Projects/RoboMaster/foray_simulation`），`origin` 为 SSH
-  `git@github.com:ZQU-Foray/foray_simulation.git`；宿主未装 `gh`，PR 需在网页发起。
-  `foray_localization/local/staging/` 下的旧副本不再使用。
+- **开发副本路径（2026-11-11 更正）**：日常开发副本是 **`~/Projects/diesel_simulation`**
+  （不是此前写的 `~/Projects/RoboMaster/diesel_simulation`），`origin` 为 SSH
+  `git@github.com:ZQU-Foray/diesel_simulation.git`；宿主未装 `gh`，PR 需在网页发起。
+  `diesel_localization/local/staging/` 下的旧副本不再使用。
 - **I14（相机 / 图像链路）是新增对外接口，需先立需求**：`model.sdf` 目前只有
   `gpu_lidar` + `imu`，`config/bridge.yaml` 只桥 5 条话题。加相机就会多出
   `/camera/image_raw`、`/camera/camera_info` 这类对外话题，`README.md` 的 A0–A7
-  没有对应条目——按「`README.md` 是唯一需求源」，得先由 `foray_interfaces` 定契约
+  没有对应条目——按「`README.md` 是唯一需求源」，得先由 `diesel_interfaces` 定契约
   （话题名 / 编码 / `camera_info` 口径），再回 `README.md` 立需求，然后才动 `model.sdf`
   与 `bridge.yaml`。在此之前 I11–I13 只用现有话题即可完成。
 - **可视化窗口本机开不出来（取证限制）**：宿主没有 `docker` / `rviz2` / `rqt` / `gz`，
   I11–I13、I16 的「窗口真的开出来、显示项确实有数据」这类回执只能在
-  `foray_sim:humble-fortress` 容器里、把 X11 递进去补；本轮只做到配置文件与
+  `diesel_sim:humble-fortress` 容器里、把 X11 递进去补；本轮只做到配置文件与
   `--show-args` 一级的核对。同理 I15 的频率/延迟数据也要在容器内才有意义。
 
 ## 复现命令
 
 ```bash
 # 单元级（不需要仿真环境，宿主即可跑）
-colcon build --packages-select foray_rmul_2027_field foray_simulation_bringup
-colcon test  --packages-select foray_rmul_2027_field foray_simulation_bringup
+colcon build --packages-select diesel_rmul_2027_field diesel_simulation_bringup
+colcon test  --packages-select diesel_rmul_2027_field diesel_simulation_bringup
 colcon test-result --all      # 期望 0 errors 0 failures
 
 # 仓级门禁（纯标准库）
@@ -321,21 +341,21 @@ python3 scripts/ci/check_style.py && python3 scripts/ci/check_tree_doc.py \
     && python3 scripts/ci/check_layer.py && python3 scripts/ci/selftest.py
 
 # 仿真（需要派生镜像；宿主缺 docker / nav2 / ros_gz / point_lio 时只能跳过这两步）
-docker build -t foray_sim:humble-fortress docker/
-ros2 launch foray_simulation_bringup simulation.launch.py headless:=true
+docker build -t diesel_sim:humble-fortress docker/
+ros2 launch diesel_simulation_bringup simulation.launch.py headless:=true
 
 # 调车窗口：最小集（rviz/sim.rviz）
-ros2 launch foray_simulation_bringup navigation_sim.launch.py gui:=true rviz:=true
+ros2 launch diesel_simulation_bringup navigation_sim.launch.py gui:=true rviz:=true
 
 # 调车窗口：全量视图（I11，已实现；开窗回执待容器）
-ros2 launch foray_simulation_bringup navigation_sim.launch.py rviz:=true rviz_config:=tune.rviz
-src/foray_simulation_bringup/scripts/sim_up.sh --gui --tune   # 等价简写
+ros2 launch diesel_simulation_bringup navigation_sim.launch.py rviz:=true rviz_config:=tune.rviz
+src/diesel_simulation_bringup/scripts/sim_up.sh --gui --tune   # 等价简写
 
 # 调车窗口：其余入口要等 M5 后续阶段，下面几条现在跑会报参数/文件不存在
-# ros2 launch foray_simulation_bringup navigation_sim.launch.py rqt:=true                          # I13
+# ros2 launch diesel_simulation_bringup navigation_sim.launch.py rqt:=true                          # I13
 # python3 scripts/tune_report.py                                                                   # I15
 # ros2 run foxglove_bridge foxglove_bridge   # I16，浏览器开 https://studio.foxglove.dev 连接
 ```
 
-窗口只能在 `foray_sim:humble-fortress` 容器里开（宿主无 `rviz2` / `rqt` / `gz`），
+窗口只能在 `diesel_sim:humble-fortress` 容器里开（宿主无 `rviz2` / `rqt` / `gz`），
 需要把 X11 递进容器（`-e DISPLAY -v /tmp/.X11-unix:/tmp/.X11-unix`）。

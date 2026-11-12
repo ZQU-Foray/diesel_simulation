@@ -1,22 +1,22 @@
 #!/usr/bin/env python3
-"""依赖方向门禁：`.foray-layer` 的层级声明必须自洽且不反向。
+"""依赖方向门禁：`.diesel-layer` 的层级声明必须自洽且不反向。
 
 依据 `foray_docs/repository_structure.md` §6.5「依赖方向校验」：
 
     L(n) 不得依赖 L(>n)
-    不得依赖装配根仓 foray_robots
-    foray_interfaces 不得依赖任何自研仓
+    不得依赖装配根仓 diesel_robots
+    diesel_interfaces 不得依赖任何自研仓
 
 单仓 CI 只看得到本仓的声明，所以本脚本校验声明本身是否自洽：
 
-  1. 仓根必须有 `.foray-layer`，且含 `layer:` 与 `depends_on_layers:` 两个键
+  1. 仓根必须有 `.diesel-layer`，且含 `layer:` 与 `depends_on_layers:` 两个键
   2. `layer` 必须是 §1/§2 定义的层级之一
   3. 声明的依赖层级必须都是比自身更低的层（反向依赖在这里就红）
   4. 不得自依赖、不得重复声明
   5. `META` / `T` 这类不在 L0–L5 主干上的层，必须声明空依赖
      （它们要么是元仓、要么是离线工具层，不参与层级序）
 
-跨仓那半条（「不得依赖装配根」）需要看别的仓，属于元仓 `foray_ws` 集成 CI 的职责，
+跨仓那半条（「不得依赖装配根」）需要看别的仓，属于元仓 `diesel_ws` 集成 CI 的职责，
 本脚本不假装自己检查了它。
 
 用法：
@@ -29,7 +29,7 @@ import re
 import sys
 from pathlib import Path
 
-LAYER_FILE = Path(".foray-layer")
+LAYER_FILE = Path(".diesel-layer")
 
 # 层级自低到高。数值只用于比较「谁在谁下面」，不参与任何运行时逻辑。
 LAYER_ORDER = {
@@ -49,7 +49,7 @@ KEY_VALUE_RE = re.compile(r"^\s*([A-Za-z_]+)\s*:\s*(.*?)\s*$")
 
 
 def parse_layer_file() -> tuple[str, list[str]]:
-    """解析 `.foray-layer`，返回 (layer, depends_on_layers)。"""
+    """解析 `.diesel-layer`，返回 (layer, depends_on_layers)。"""
     if not LAYER_FILE.is_file():
         raise SystemExit(f"::error::仓根缺少 {LAYER_FILE}（规则见 foray_docs §6.5）")
 

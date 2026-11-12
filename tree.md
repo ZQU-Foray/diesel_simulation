@@ -7,7 +7,7 @@
 > 新增 / 删除 / 重命名文件的提交，必须在同一次提交内更新本文件。
 
 ```
-foray_simulation/
+diesel_simulation/
 ├── README.md                                  # 本仓唯一需求来源（A0–A7 验收表）
 ├── AGENTS.md                                  # AI / 协作者规范（组织统一版）
 ├── THIRD_PARTY_NOTICES.md                     # 三方来源与许可证归属链
@@ -16,7 +16,7 @@ foray_simulation/
 ├── plan.md                                    # 当前计划与进度（可中断恢复）
 ├── decision.md                                # 关键工程决策与取证留痕
 ├── CODEOWNERS                                 # Review 自动分派（§7.3 要求每仓自带）
-├── .foray-layer                               # 层级声明（META）
+├── .diesel-layer                               # 层级声明（META）
 ├── .clang-format                              # C/C++ 风格，与 platform/interfaces 同一份
 ├── .gitignore                                 # 构建产物、运行期产物、.dsh 状态
 ├── pyproject.toml                             # ruff 目标版本 3.10（与 humble 对齐）
@@ -29,10 +29,10 @@ foray_simulation/
 │   └── ci/
 │       ├── check_style.py                     # 文件卫生门禁：LF / UTF-8 / 末尾单空行
 │       ├── check_tree_doc.py                  # tree.md 与 git ls-files 双向一致
-│       ├── check_layer.py                     # .foray-layer 层级声明自洽（§6.5）
+│       ├── check_layer.py                     # .diesel-layer 层级声明自洽（§6.5）
 │       └── selftest.py                        # 门禁自检：注入缺陷断言三门禁会红
 └── src/
-    ├── foray_rmul_2027_field/                 # 场地资源包（纯资产，无运行时节点）
+    ├── diesel_rmul_2027_field/                 # 场地资源包（纯资产，无运行时节点）
     │   ├── package.xml                        #   ament_cmake，exec_depend ros_ign_gazebo
     │   ├── CMakeLists.txt                     #   安装 models/worlds/maps/docs/previews
     │   ├── docs/
@@ -102,7 +102,7 @@ foray_simulation/
     │   │   └── rmul_2027.sdf                  #   唯一交付的世界（Fortress 口径）
     │   └── test/
     │       └── test_field_assets.py           #   资源断言：插件前缀、地图几何、网格可解析
-    └── foray_simulation_bringup/              # 启动层：把仿真器接到本仓算法上
+    └── diesel_simulation_bringup/              # 启动层：把仿真器接到本仓算法上
         ├── package.xml                        #   ament_cmake，exec_depend 上游与自研包
         ├── CMakeLists.txt                     #   安装 launch/config/rviz/models/map + scripts
         ├── launch/
@@ -127,7 +127,7 @@ foray_simulation/
         │       ├── rmul_2027_nav.pgm          #   512x352，仅隧道开放段与官方图不同
         │       └── rmul_2027_nav.yaml         #   与官方 yaml 同分辨率/原点/阈值
         ├── models/
-        │   └── foray_sim_robot/
+        │   └── diesel_sim_robot/
         │       └── model.sdf                  #   仿真机器人（底盘 + mid360 + IMU）
         ├── scripts/
         │   ├── make_pcd.py                    #   场地网格 → 先验点云（三角面格点采样）
@@ -152,8 +152,8 @@ foray_simulation/
 
 | 目录 | 职责 | 不做什么 |
 |---|---|---|
-| `foray_rmul_2027_field` | 场地几何、材质、地图基准、场地规格文档 | 不放 launch、不写节点 |
-| `foray_simulation_bringup` | 世界组装、机器人 spawn、桥接、参数、一键脚本 | 不实现定位/导航算法（那是 `foray_localization` / `foray_navigation`） |
+| `diesel_rmul_2027_field` | 场地几何、材质、地图基准、场地规格文档 | 不放 launch、不写节点 |
+| `diesel_simulation_bringup` | 世界组装、机器人 spawn、桥接、参数、一键脚本 | 不实现定位/导航算法（那是 `diesel_localization` / `diesel_navigation`） |
 | `map/rmul_2027` | 定位侧先验（点云 + 栅格 + 清单） | 不做运行时修改；重新生成靠脚本 |
 | `map/nav2` | 导航侧栅格（官方图的派生副本 + 差异断言） | 不改官方图；差异必须落在隧道开放段内 |
 | `tools/`（field 包内） | 上游资产生成与审计脚本，供追溯 | 不被安装、不被运行时依赖 |
@@ -167,6 +167,6 @@ foray_simulation/
 |---|---|---|
 | CODEOWNERS | 仓根 | §7.3（必须在本仓，组织 `.github` 里那份不生效） |
 | CI | `.github/workflows/ci.yml` | §6.4（复制组织模板并按技术栈裁剪） |
-| 层级声明 | `.foray-layer` | §6.5（CI `layer-check` 校验） |
+| 层级声明 | `.diesel-layer` | §6.5（CI `layer-check` 校验） |
 | C/C++ 风格 | `.clang-format` | §6.6 |
 | Python 风格 | `pyproject.toml`（ruff + black） | §6.6 |

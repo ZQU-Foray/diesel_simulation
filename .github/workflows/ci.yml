@@ -5,13 +5,13 @@
 #   dir-layout      目录与包命名规范（仓根不平铺包、包名=目录名、非 bringup 包须有 test/）
 #   file-hygiene    文件卫生（LF / UTF-8 / 末尾单空行 / 无行尾空白）
 #   doc-sync        tree.md 与实际跟踪文件双向一致
-#   layer-check     .foray-layer 依赖方向自洽（foray_docs §6.5）
+#   layer-check     .diesel-layer 依赖方向自洽（foray_docs §6.5）
 #   lint-python     Python 语法/格式（ruff + black）
 #   lint-c          C/C++ 格式（本仓当前无 C/C++，作业自动跳过）
 #   gate-selftest   往仓库副本注入已知缺陷，断言三门禁确实会红
 #   build-ros2      colcon 构建 + ros2 pkg executables + launch 解析 + colcon test
 #
-# 与 foray_localization 的差异（按本仓实际形态裁剪，不照抄）：
+# 与 diesel_localization 的差异（按本仓实际形态裁剪，不照抄）：
 #   - 无 param-contract / contract-lock：本仓不发布 msg/srv/action，参数清单
 #     在 README §4，由 doc-sync 与人工 Review 守；不是本仓的接口契约面。
 #   - gate-selftest 用临时目录里的仓库副本注入缺陷（不需要 Docker 或仿真），
@@ -111,7 +111,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: 校验 .foray-layer
+      - name: 校验 .diesel-layer
         run: python3 scripts/ci/check_layer.py
 
   # ---- Python 代码检查 ----
@@ -197,7 +197,7 @@ jobs:
 
   # ---- ROS 2 构建与测试 ----
   # 本仓的运行时依赖里有多个只存在于容器镜像内的上游包（point_lio、
-  # ign_sim_pointcloud_tool、foray_localization_ros 等），apt/rosdep 拿不到；
+  # ign_sim_pointcloud_tool、diesel_localization_ros 等），apt/rosdep 拿不到；
   # 它们是 exec_depend，rosdep 用 -r 跳过即可，不影响本仓两个包的 colcon 构建。
   # 整链仿真验证（A0–A7）不在 CI 里跑：软件渲染的 Gazebo 在 runner 上不稳定，
   # 由 docker/ 镜像 + 本地容器回归承担（见 plan.md 的验收章节）。
@@ -243,16 +243,16 @@ jobs:
           source install/setup.bash
           # 脚本必须按 PROGRAMS 装进 lib/<pkg>/，否则 launch 会报
           # "executable ... not found on the libexec directory"
-          ros2 pkg executables foray_simulation_bringup | tee /tmp/exes.txt
+          ros2 pkg executables diesel_simulation_bringup | tee /tmp/exes.txt
           for exe in make_pcd.py make_manifest.py make_nav_map.py set_initial_pose.py \
                      accept.py sim_up.sh; do
-            grep -qx "foray_simulation_bringup $exe" /tmp/exes.txt \
+            grep -qx "diesel_simulation_bringup $exe" /tmp/exes.txt \
               || { echo "::error::ros2 pkg executables 缺少 $exe"; exit 1; }
           done
           # launch 文件必须能被解析（--show-args 不启动任何进程）
           for launch_file in simulation.launch.py localization_sim.launch.py \
                             navigation_sim.launch.py; do
-            ros2 launch foray_simulation_bringup "$launch_file" --show-args
+            ros2 launch diesel_simulation_bringup "$launch_file" --show-args
           done
 
       - name: 测试 (colcon test)

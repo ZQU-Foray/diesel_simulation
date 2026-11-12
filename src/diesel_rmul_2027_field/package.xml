@@ -1,0 +1,20 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+    <name>diesel_rmul_2027_field</name>
+    <version>0.1.0</version>
+    <description>
+        RMUL 2027 3v3 比赛场地资源包：Gazebo Fortress 世界文件、分件网格、官方地图与
+        STEP 复核参数。几何与地图资产借鉴 guodong_sentry_sim 迁移包（见 THIRD_PARTY_NOTICES）。
+    </description>
+    <maintainer email="ryanz@example.com">RyanZ</maintainer>
+    <license>Apache-2.0</license>
+
+    <buildtool_depend>ament_cmake</buildtool_depend>
+
+    <exec_depend>ros_ign_gazebo</exec_depend>
+
+    <export>
+        <build_type>ament_cmake</build_type>
+    </export>
+</package>

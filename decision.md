@@ -45,7 +45,7 @@
 
 ## D5 manifest 与栅格/PCD 同目录
 
-`foray_localization` 的地图加载按 `manifest 目录 / 字段值` 定位文件，`pcd_file` / `grid_file`
+`diesel_localization` 的地图加载按 `manifest 目录 / 字段值` 定位文件，`pcd_file` / `grid_file`
 必须是相对路径且不含 `..`。因此地图目录固定为 `map/rmul_2027/`，`make_manifest.py` 只负责
 读 nav2 yaml 的 `image/resolution/origin`、读 PGM 尺寸、算两个 sha256，**不猜、不手填**。
 
@@ -57,8 +57,8 @@
 
 ## D7 本仓层级为 META
 
-仿真属于工具链，不在算法六层里。`.foray-layer` 声明 `layer: META`、`depends_on_layers: []`，
-与 `foray_ws` 一致；它**运行时**依赖 `foray_localization` 的可执行文件，但不链接其代码，
+仿真属于工具链，不在算法六层里。`.diesel-layer` 声明 `layer: META`、`depends_on_layers: []`，
+与 `diesel_ws` 一致；它**运行时**依赖 `diesel_localization` 的可执行文件，但不链接其代码，
 因此不构成层级依赖。
 
 ## D8 点云与 IMU 的仿真口径
@@ -83,8 +83,8 @@
 **现象**：`point_lio` 进程存活、`ros2 topic info` 显示它订阅了 `/velodyne_points`（BEST_EFFORT）
 与 `/livox/imu`、也是 `/aft_mapped_to_init` 的发布者，但插桩后 `sync_packages`
 一秒不停打印 `lidar_buf=0 imu_deque=0 imu_en=1 last_imu=-1.000`——**两个回调从未被调用**，
-`/aft_mapped_to_init` 一帧都没有，`foray_localization` 因此 `pose_valid=false`、A2 无从取证。
-同一时刻同一个容器里，`foray_localization` 的 `map_server_node` 能正常加载地图、
+`/aft_mapped_to_init` 一帧都没有，`diesel_localization` 因此 `pose_valid=false`、A2 无从取证。
+同一时刻同一个容器里，`diesel_localization` 的 `map_server_node` 能正常加载地图、
 python 探针能收到同两条话题的数据。
 
 **已排除**（每条都实测过，回执见 `local/evidence-sim/i6-point-lio-blocker.txt`）：
@@ -113,10 +113,10 @@ I6–I8 留待下一轮；`localization_sim.launch.py` 与 `point_lio_sim.yaml` 
 
 ## D10 摆位必须用 MODE_GEOMETRIC
 
-`foray_localization` 的 `/localization/relocalize` 服务有两个模式：`MODE_GEOMETRIC=0`、
+`diesel_localization` 的 `/localization/relocalize` 服务有两个模式：`MODE_GEOMETRIC=0`、
 `MODE_PLACE=1`。本仓 `scripts/set_initial_pose.py` 必须用 **MODE_GEOMETRIC**：用 MODE_PLACE
 会被拒（`place 后端默认关闭（D10）；请使用 MODE_GEOMETRIC 给定初值`），仿真里没有 place 后端。
-服务名是**绝对名** `/localization/relocalize`（不是 `/foray_localization/relocalize`）。
+服务名是**绝对名** `/localization/relocalize`（不是 `/diesel_localization/relocalize`）。
 
 ## D11 `ign_sim_pointcloud_tool` 的 `ang_bottom` 必须传正数（下沿角绝对值）
 
@@ -142,7 +142,7 @@ I6–I8 留待下一轮；`localization_sim.launch.py` 与 `point_lio_sim.yaml` 
 
 **现象**：D11 修好后里程计能出，但**一启动就发散**——静止机器人在 40 s 时
 `/aft_mapped_to_init` 已经跑到 `x=310 m / z=-1201 m`，53 s 到 `x=-759 m / z=-6506 m`，
-70 s 量级到了 12 km；`foray_localization` 用它做先验运动的 guess，ICP 直接 0 对应
+70 s 量级到了 12 km；`diesel_localization` 用它做先验运动的 guess，ICP 直接 0 对应
 （插桩 `guess_t=(152449, 344122, -3070468)`），看起来像「配准坏了」，其实是先验炸了。
 
 **定位**：把同一份仿真**热着**（Gazebo 已经在跑）只重启 `point_lio`，`use_imu_as_input`
@@ -165,7 +165,7 @@ I6–I8 留待下一轮；`localization_sim.launch.py` 与 `point_lio_sim.yaml` 
 `probe_found=1688/1688`），`/localization/state` 却一直 `pose_valid=false`，
 `age_sec` 只增不减。
 
-**根因**：`foray_localization` 的健康判定默认阈值是
+**根因**：`diesel_localization` 的健康判定默认阈值是
 `odom_timeout_sec 0.5` / `lidar_timeout_sec 0.2` / `lost_timeout_sec 1.0`，
 而 **LOST 是粘滞状态，只能靠 Relocalize 恢复**。本仿真里两个量都贴着阈值：
 - 里程计消息戳取 `lidar_beg_time`，比 `/clock` 落后约 0.17 s，`now-last_odom` 常态顶到 0.47 s，
@@ -177,7 +177,7 @@ I6–I8 留待下一轮；`localization_sim.launch.py` 与 `point_lio_sim.yaml` 
 
 **决定**：只在本仓 launch 的 `localization_params` 里放宽为
 `odom_timeout_sec: 2.0`、`lidar_timeout_sec: 2.5`、`lost_timeout_sec: 5.0`，并声明这是
-**仿真侧容差、不是定位算法指标**——真机口径由 `foray_localization` 自己定，本仓不改它的算法。
+**仿真侧容差、不是定位算法指标**——真机口径由 `diesel_localization` 自己定，本仓不改它的算法。
 配套把 `initial_pose_delay` 默认从 12 s 收到 6 s（`point_lio` 已在 4 s 起，摆位不必再等 12 s）。
 
 **回执**：默认参数 95 s 采样 4737 条状态 ⇒ `{INITIALIZING: 314, OK: 4423}`，
@@ -194,7 +194,7 @@ A2 的三条判据（10 s 内 OK、位置 < 0.30 m、朝向 < 5°）全部满足
 
 **背景**：`foray_docs/repository_structure.md` §10 要求每个仓含
 `CODEOWNERS` 与 `.github/workflows/ci.yml`，§6.4/§6.5/§6.6/§7.3 给了具体口径。
-本仓 2026-10 新建时只带了 AGENTS.md 与 `.foray-layer`，缺这两个文件——同一份 AGENTS.md
+本仓 2026-10 新建时只带了 AGENTS.md 与 `.diesel-layer`，缺这两个文件——同一份 AGENTS.md
 （md5 `b4f2d108…`）在 interfaces/localization/navigation/sim 四个仓里逐字相同，
 但只有本仓没有任何门禁去执行它，等于规矩只写在墙上。
 
@@ -234,7 +234,7 @@ A2 的三条判据（10 s 内 OK、位置 < 0.30 m、朝向 < 5°）全部满足
 
 **理由**：
 - 本仓两个包都是 `project(... NONE)` 的纯资源/装配包，构建期不需要上游运行时；
-  `point_lio` / `ign_sim_pointcloud_tool` / `foray_localization_ros` 等都是 `exec_depend`，
+  `point_lio` / `ign_sim_pointcloud_tool` / `diesel_localization_ros` 等都是 `exec_depend`，
   rosdep 用 `-r` 跳过即可。
 - 整链验收（A0–A7）依赖软件渲染的 Gazebo，帧率随宿主机负载在 4–7 Hz 之间漂
   （见 D13 的实测），在共享 runner 上既不稳也不快；它已经由 `docker/` 镜像 + 本地容器回归覆盖。
@@ -254,8 +254,8 @@ localization 的 D15/D18 已经证明「恒跳过的门禁」是本组织最真�
 
 ## D16 Nav2 用**派生**导航栅格，官方 PGM 只给定位
 
-**决定**：定位继续吃 `src/foray_rmul_2027_field/maps/rmul_2027/rmul_2027.pgm`（A4/A5 的
-哈希契约不动），Nav2 另起一张**派生图** `src/foray_simulation_bringup/map/nav2/rmul_2027_nav.pgm`，
+**决定**：定位继续吃 `src/diesel_rmul_2027_field/maps/rmul_2027/rmul_2027.pgm`（A4/A5 的
+哈希契约不动），Nav2 另起一张**派生图** `src/diesel_simulation_bringup/map/nav2/rmul_2027_nav.pgm`，
 由 `scripts/make_nav_map.py` 从官方图逐像素复制后，只把隧道顶投影矩形
 （x 3.325–3.675 / y 7.06–7.86，共 462 格）由全占据改成全自由，其余 res/origin/thresholds 逐字保持。
 
@@ -287,13 +287,13 @@ x=2.6/3.0/3.3375/3.5/3.6625/3.9/4.3 各列连续自由带 ≥ 0.70 m。生成脚
 `map_server` 与它的 lifecycle_manager 由本仓单独起，**不用 amcl**。
 
 **理由**：
-- `foray_localization` 只发 `map→odom`，`robot_state_publisher` 吃的是无 joint 的 SDF，
+- `diesel_localization` 只发 `map→odom`，`robot_state_publisher` 吃的是无 joint 的 SDF，
   所以 `odom→base_footprint` 这一段在本仓原本是空的——Nav2 的 costmap 一查就
   `Extrapolation Error ... from frame [base_footprint] to frame [map]`。
 - `sensor_scan_generation` 恰好就是干这件事的上游实现（`publishTransform(tf_odom_to_chassis,
   odometry->header.frame_id, base_frame_)`），且 `robot_base_frame` 可配；我们没有云台，
   三个 frame 参数都填 `base_footprint`。
-- 不启 amcl：amcl 会自己发 `map→odom`，和 `foray_localization` 抢同一条边，定位会跳。
+- 不启 amcl：amcl 会自己发 `map→odom`，和 `diesel_localization` 抢同一条边，定位会跳。
 
 **代价**：`sensor_scan_generation` 依赖 `lidar→base` 静态 TF，那条边由
 `localization_sim.launch.py` 发，所以 `navigation_sim.launch.py` 必须 include 它而不是
@@ -312,7 +312,7 @@ D15 里「A2 判据门脚本没入库」的欠账一并还清。
   假通过比判红危险。
 - `gate-selftest` 的理由同 D15 的欠账段落：一个被改坏的门禁会安静地一直通过。
   `selftest.py` 复制仓库到临时目录、`git init` 后注入五类缺陷
-  （CRLF / tree 少一行 / 多一个未登记文件 / 删掉已登记文件 / `.foray-layer` 反向依赖），
+  （CRLF / tree 少一行 / 多一个未登记文件 / 删掉已登记文件 / `.diesel-layer` 反向依赖），
   断言对应门禁非零退出，最后跑干净副本必须三门全绿。它不需要 Docker，所以能进 CI。
 
 ## D19 本仓采用 Apache-2.0
@@ -328,18 +328,18 @@ D15 里「A2 判据门脚本没入库」的欠账一并还清。
 
 ## D20 `cmd_vel` 桥接的 gz 侧话题必须带 `/model/` 前缀
 
-**决定**：`src/foray_simulation_bringup/config/bridge.yaml` 的 `cmd_vel` 条目的
-`gz_topic` 由 `/foray_sim_robot/cmd_vel` 改为 `/model/foray_sim_robot/cmd_vel`。
+**决定**：`src/diesel_simulation_bringup/config/bridge.yaml` 的 `cmd_vel` 条目的
+`gz_topic` 由 `/diesel_sim_robot/cmd_vel` 改为 `/model/diesel_sim_robot/cmd_vel`。
 
 **理由（实测证据）**：`ignition-gazebo-velocity-control-system` 在模型命名空间下订阅，
 启动日志原话是 `VelocityControl subscribing to twist messages on
-[/model/foray_sim_robot/cmd_vel]`。原来的桥接把 ROS `/cmd_vel` 转发到
-`/foray_sim_robot/cmd_vel`，桥接日志照样打印「Creating ROS->GZ Bridge」、ROS 侧
+[/model/diesel_sim_robot/cmd_vel]`。原来的桥接把 ROS `/cmd_vel` 转发到
+`/diesel_sim_robot/cmd_vel`，桥接日志照样打印「Creating ROS->GZ Bridge」、ROS 侧
 `ros2 topic pub` 也照常成功，**但车永远不动**——是一个只靠 `ign topic -l` 看不出、
 只有对比真值位姿才会暴露的静默错接。
 
 - 错接时：`ros2 topic pub -r 20 /cmd_vel ... "{linear: {x: 0.5}}"` 持续 10 s，
-  `/sim/pose_info` 里 `foray_sim_robot` 一直停在 (6.0, 4.0)。
+  `/sim/pose_info` 里 `diesel_sim_robot` 一直停在 (6.0, 4.0)。
 - 改对后：同样命令 9 s，真值 x 由 6.0 变 7.35（墙钟 9 s、RTF ≈ 0.3，与
   `0.5 m/s × 仿真时间` 相符）。
 
@@ -367,8 +367,8 @@ D15 里「A2 判据门脚本没入库」的欠账一并还清。
 **已知限制（待容器回执）**：宿主没有 `rviz2`/`gz`，本轮只做到 YAML 结构、
 话题白名单与 launch 参数解析一级；「窗口真开出来且每项有数据」、
 `Odometry` display 是否支持 `Keep`（累积轨迹）、`/map` 是否被
-`foray_map_server` 与 nav2 `map_server` 双发布，都要在
-`foray_sim:humble-fortress` 容器里补证。
+`diesel_map_server` 与 nav2 `map_server` 双发布，都要在
+`diesel_sim:humble-fortress` 容器里补证。
 
 ## D22 gz GUI 面板用绝对 x/y 摆放，`WorldControl` 必须显式 `start_paused=false`
 
@@ -394,7 +394,7 @@ false」三条写成断言。
 
 ## D23 调车 rqt 用启动器按需拉面板，且不写进 `package.xml`
 
-**决定**：新增 `scripts/tune_rqt.sh`（装到 `lib/foray_simulation_bringup`），由
+**决定**：新增 `scripts/tune_rqt.sh`（装到 `lib/diesel_simulation_bringup`），由
 `navigation_sim.launch.py` 的 `rqt:=true` 以普通 `Node` 拉起；`sim_up.sh` 加 `--rqt`
 （`--no-nav` 时自动收掉，因为 `localization_sim.launch.py` 没有该参数）。
 脚本逐个 `command -v` 检查 `rqt_graph`/`rqt_topic`/`rqt_plot`/`rqt_console`/
@@ -413,11 +413,11 @@ false」三条写成断言。
   另加 `sim_up.sh --rqt` 的透传与 `--no-nav` 收敛断言。
 
 **未覆盖**：面板真实弹出、`rqt_plot` 三条曲线真的有数据，需在
-`foray_sim:humble-fortress` 容器 + X11 下人工确认。
+`diesel_sim:humble-fortress` 容器 + X11 下人工确认。
 
 ## D24 调车快照用统一采样窗口，缺数据标 `missing` 而不是 0 Hz
 
-**决定**：新增 `scripts/tune_report.py`（装到 `lib/foray_simulation_bringup`），用一个
+**决定**：新增 `scripts/tune_report.py`（装到 `lib/diesel_simulation_bringup`），用一个
 `--window` 窗口同时采样 `/livox/lidar`、`/cloud_registered`、`/aft_mapped_to_init`、
 `/odometry`、`/localization/state`、`/cmd_vel`、`/sim/pose_info`，并按
 `map→odom→base_footprint→front_mid360` 逐段查 TF，最后输出人读表格或 `--json`
@@ -435,7 +435,7 @@ false」三条写成断言。
 
 **已踩过的坑（写进代码注释）**：`/sim/pose_info` 桥过来是 `tf2_msgs/TFMessage`
 （gz 的 `pose/info`），不是位姿消息本体；要按 `child_frame_id` 取
-`foray_sim_robot/chassis`，退回模型根位姿。`LocalizationState` 用
+`diesel_sim_robot/chassis`，退回模型根位姿。`LocalizationState` 用
 `state` 常量 + `pose_valid`，没有 `status` 字段——初版按 `status` 写是错的。
 
 **未覆盖**：真实话题上的频率数值、TF 查询在 `use_sim_time` 下的表现、
@@ -500,3 +500,43 @@ false」三条写成断言。
 - **测量注意**：链一次只能有一条。`pkill` 在新的 PID 命名空间里杀不到上一轮进程，
   旧链会和新的同时发 `/clock`，把 RTF 量成 2.4（真值 1.000）。每次验证换新的
   `ROS_DOMAIN_ID`。
+
+## D27 Nav2 整栈进 `/diesel/<robot>`：三处必须显式做的事
+
+<!-- lint: allow-long-lines -->
+Context：定位侧的话题改相对名后（`diesel_localization` D61），导航侧也要落到同一个
+`/diesel/<robot>`，否则多机同场时 `bt_navigator`、`costmap`、`cmd_vel` 会互相抢。
+
+Decision：
+
+1. **用 `PushRosNamespace` 包住 nav2 include**。humble 的
+   `nav2_bringup/launch/navigation_launch.py` 里 `namespace` 只用于参数 YAML 的
+   `root_key` 与组合容器名，非组合模式下**不给各 Node 加 namespace**。只传
+   `namespace:=` 的结果是参数键被改写成 `/diesel/sentry/<节点>`、节点名仍是全局的，
+   于是 Nav2 退回默认参数——实测日志 `Couldn't load critics!`、
+   `Controller frequency set to 20.0000Hz`（本仓配置是 10.0）。
+2. **参数 YAML 顶层键是相对节点名，进命名空间后必须重写**。`nav2_params_sim.yaml`
+   一直是相对键（`bt_navigator:` 等），`sentry.yaml` 也是（`diesel_localization:`、
+   `diesel_map_server:`）。节点进了命名空间，这些键匹配不上，ROS 2 会**静默丢弃**
+   整份参数——症状是启动行打印的是代码默认值而不是兵种配置。
+   对策：仿真侧两个 include 都在 launch 里用 `nav2_common.launch.RewrittenYaml`
+   以 `root_key=LaunchConfiguration("robot_namespace")` 包一层；`root_key` 解析为空串
+   时 `RewrittenYaml.perform()` 不改写，实车（无 namespace）行为不变。
+3. **跨边界话题写绝对名，TF 帧名不进 namespace**。`/odometry`（Nav2 的
+   `odom_topic`）与 `/cmd_vel`（gz 桥的 `ros_topic`）在两侧都被写死成绝对名，
+   否则相对名会解析成 `/diesel/sentry/odometry`、`/diesel/sentry/cmd_vel`，
+   桥建得起来、日志不报错，车永远不动。TF 帧（`map` / `odom` / `base_footprint` /
+   `body`）是全局契约，不随命名空间变化。
+
+Reason：`/cmd_vel` 与 `map` 是跨机器人共享资源的唯一入口，一旦进 namespace，
+gz 桥、`nav2_map_server` 与上游里程计就各自指向不同的话题，多机同场必然互相覆盖。
+
+Consequences：`accept.py` 的生命周期探针与 `NavigateToPose` action 客户端改为
+`<ns>/bt_navigator/get_state`、`<ns>/controller_server/get_state`、
+`<ns>/navigate_to_pose`；`robot_namespace` 提成 `navigation_sim.launch.py` 的
+launch 参数（默认 `/diesel/sentry`），实机换机器人只改这一个值。
+
+已知未决（2026-11-12 记，未修）：本机自编栈起链时 `align_source≈1223`、
+degeneracy `4/6 个方向不可观`，跨过 `max_unobservable_dofs: 3` 就会一路 LOST；
+M11 时代的容器栈是 `align_source≈1697`、`2/6`。点云为何变稀（`voxel=2171` 对
+M11 的 `3197`）尚未定位，不动兵种阈值——那是安全边界，不能为了仿真好看放宽。
