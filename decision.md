@@ -469,4 +469,3 @@ false」三条写成断言。
 **未覆盖**：实车链同样缺这一层（`point_lio` 两个仓都不发 `body` TF），实车 launch 要单独落实；
 本仓只有仿真 launch。另 `camera_init → aft_mapped` 是一对孤立的两节点树，当前没有订阅者
 跨树查询，所以留它不做改动。
-
