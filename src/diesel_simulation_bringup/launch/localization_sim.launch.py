@@ -24,6 +24,7 @@ from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
+from nav2_common.launch import RewrittenYaml
 
 # 迁移包 parameters.json 的实测雷达安装高度（279.62 mm）
 LIDAR_POSE = ("0.08", "0.0", "0.27962", "0.0", "0.0", "0.0")
@@ -86,6 +87,18 @@ def generate_launch_description():
     )
     sentry_params = PathJoinSubstitution(
         [FindPackageShare("diesel_localization_bringup"), "config", "sentry.yaml"]
+    )
+    # 兵种配置的顶层键是**相对节点名**（`diesel_localization:` / `diesel_map_server:`）。
+    # 节点一旦进了 /diesel/<robot> 命名空间，这两个键就匹配不上，ROS 2 会把整份参数
+    # 静默丢弃——症状是启动行打印代码默认值（min_source_points=0 / max_unobservable_dofs=6）
+    # 而不是兵种配置的 100/3，配准随之 initialization timeout。
+    # 这里用 RewrittenYaml 把整份 YAML 挂到命名空间下，键变成 /diesel/sentry/<节点>；
+    # root_key 解析为空串时不改写（见 RewrittenYaml.perform 的 `if root_key:`），
+    # 所以实车（无 namespace）行为不变。
+    sentry_params_ns = RewrittenYaml(
+        source_file=sentry_params,
+        param_rewrites={},
+        root_key=LaunchConfiguration("robot_namespace"),
     )
 
     sim_include = IncludeLaunchDescription(
@@ -196,7 +209,7 @@ def generate_launch_description():
     )
 
     localization_params = [
-        sentry_params,
+        sentry_params_ns,
         {
             "use_sim_time": True,
             "map_manifest": map_manifest,
