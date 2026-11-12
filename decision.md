@@ -469,3 +469,34 @@ false」三条写成断言。
 **未覆盖**：实车链同样缺这一层（`point_lio` 两个仓都不发 `body` TF），实车 launch 要单独落实；
 本仓只有仿真 launch。另 `camera_init → aft_mapped` 是一对孤立的两节点树，当前没有订阅者
 跨树查询，所以留它不做改动。
+
+## D26 仿真点云下采样按「够配准」定，不照抄上游的 32 线机械雷达口径
+
+- **背景**：审计 L7 报 `GICP 无有效对应（source=64~70 target=4137 iterations=0）`，
+  localization 长期 `LOST`，A2 掉锁 5571 帧。查下来 `source` 是配准源点数，
+  一帧 `/livox/lidar` 有 60000 条射线，但只有 **9985（16.6%）** 有回波——
+  `model.sdf` 里 MID-360 的垂直视场是 `-7° ~ +52°`，场地 `rmul_2027` 只有约 7 m 见方
+  且没有高处结构，朝上的射线基本打空。剩下的有效点再经 `ign_sim_pointcloud_tool`
+  按 `row_id` 过滤（`ring` 全为 0 的点都在第 0 行）、`point_filter_num: 8` 抽稀、
+  `filter_size_surf: 0.2` 体素化，最终只剩 500 出头。
+- **决策**：`config/point_lio_sim.yaml` 取 `point_filter_num: 3`、`filter_size_surf: 0.1`，
+  `filter_size_map` 保持 `0.2`。
+- **实测（本机 GPU，headless，干净 `ROS_DOMAIN_ID`）**：
+  - `/cloud_registered` 572 → **1352 点**；
+  - `GICP 无有效对应` 每 2 s 一条 → **0 条**；
+  - 退化告警 5/6 方向不可观（condition≈1e10、点面约束 64~74）→ **2/6（condition≈3.3e3、点面约束≈780）**；
+  - `accept.py ready` FAIL → **PASS**（`ready_delay_s=0.3`、`last_state=OK`）；
+  - `accept.py a2 --duration 60` FAIL（`lost=5571`）→ **PASS**（`samples=12122`、
+    `max_xy_err=0.035 m`、`lost=0`）。
+- **不取 `point_filter_num: 1`**：全量入 ikd-tree 后单帧负担翻 8 倍，实测那一轮
+  `/aft_mapped_to_init` 跑到 1e4 量级（配准与下游一起垮）。先按「够用」推进。
+- **`filter_size_map` 不动**：它决定全局地图密度，改小对内存与单帧耗时的影响远大于
+  `filter_size_surf`，而配准源点数由前者决定。
+- **已知未解**：`accept.py a3` 仍 `ABORTED`（`path_len_m=356`、`max_xy_err=262`），
+  期间 `/aft_mapped_to_init` 跑到 `x=511 y=-639`——**运动状态下 point_lio 会发散**，
+  与参数无关（静止时位姿稳定、A2 原地旋转 PASS）。另有一次冷启动 `52` 条
+  `GICP 无有效对应`、`state_reason="no valid registration"` 后不再自恢复，
+  说明「首次配准失败」没有重试路径。两者都待单独处理。
+- **测量注意**：链一次只能有一条。`pkill` 在新的 PID 命名空间里杀不到上一轮进程，
+  旧链会和新的同时发 `/clock`，把 RTF 量成 2.4（真值 1.000）。每次验证换新的
+  `ROS_DOMAIN_ID`。
