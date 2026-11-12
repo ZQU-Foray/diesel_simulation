@@ -178,6 +178,27 @@ def render_entries(entries, context):
     return arguments, remappings
 
 
+def ros_endpoints(entries, context):
+    """契约里每条桥在 ROS 侧的那个话题：`[(entry_id, topic, direction, required)]`。
+
+    给验收自检用（README §1 A9）：`gz2ros` 条目要求 ROS 侧**有发布者**（数据从仿真出来），
+    `ros2gz` 条目要求 ROS 侧**有订阅者**（指令进了仿真）。话题名与启动时渲染用的是同一套
+    规则，所以这里不会和 parameter_bridge 看到的对不上。
+    """
+    endpoints = []
+
+    for entry in entries:
+        topic = entry.ros_topic or render(
+            entry.gz_topic, context, entry_id=entry.entry_id
+        )
+        if entry.ros_topic is not None:
+            # 显式 ros_topic 也可能带占位符（例如按机器人名分话题），一并渲染
+            topic = render(topic, context, entry_id=entry.entry_id)
+        endpoints.append((entry.entry_id, topic, entry.direction, entry.required))
+
+    return endpoints
+
+
 def default_path(share_dir):
     """本仓约定的契约位置：`<bringup share>/config/bridge.yaml`。"""
     return os.path.join(share_dir, "config", "bridge.yaml")

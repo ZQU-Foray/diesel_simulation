@@ -23,6 +23,7 @@ import sys
 import time
 
 import rclpy
+from ament_index_python.packages import get_package_share_directory
 from diesel_localization_ros.msg import LocalizationState
 from lifecycle_msgs.msg import State as LifecycleState
 from lifecycle_msgs.srv import GetState
@@ -35,12 +36,12 @@ from sensor_msgs.msg import PointCloud2
 from tf2_msgs.msg import TFMessage
 from tf2_ros import Buffer, TransformListener
 
-# 派生导航图里隧道开放段的投影（与 map/nav2 的派生口径、test/test_nav_map.py 一致）。
-# 写死在这里是刻意的：验收脚本要独立于被测实现，才能判实现错没错。
-TUNNEL_RECT = (3.325, 3.675, 7.06, 7.86)
+from diesel_sim_tools import profile as sim_profile
 
-# 仿真模型名（models/diesel_sim_robot/model.sdf）
-MODEL_NAME = "diesel_sim_robot"
+# 隧道窗口、A3 目标点与真值帧名来自场地/机器人规格（config/fields、config/robots，D28）。
+# 它们属于**装配输入**（世界几何、出发点、模型名），不是被测实现的定位/导航参数：验收脚本
+# 仍然独立于 diesel_localization 与 nav2 的配置，只是与启动仿真共用同一份规格——这样换场地
+# 后不会出现「launch 换了、验收还在量旧场地」的静默错判。
 
 # 判据阈值（decision.md D13/D16）
 A2_FIRST_OK_DEADLINE_S = 10.0
@@ -103,9 +104,13 @@ def lifecycle_state_name(node, service_name):
 class AcceptNode(Node):
     """一次采集/验收用的节点：只订阅，不发控制指令（a3 只发导航目标）。"""
 
-    def __init__(self, args):
+    def __init__(self, args, field, robot):
         super().__init__("accept")
         self.args = args
+        # 真值帧名按模型名找（/sim/pose_info 的 transform 名是 <model> 或 <model>/<link>）
+        self.model_name = robot.model
+        # 派生导航图里隧道开放段的投影（与 map/nav2 的派生口径、test/test_nav_map.py 一致）
+        self.tunnel_rect = field.tunnel_rect
         self.lidar_frames = 0
         self.state_msg = None
         self.state_ok_seen = False
@@ -161,11 +166,11 @@ class AcceptNode(Node):
         candidates = {
             transform.child_frame_id: transform.transform
             for transform in msg.transforms
-            if transform.child_frame_id == f"{MODEL_NAME}/chassis"
-            or transform.child_frame_id == MODEL_NAME
-            or transform.child_frame_id.startswith(f"{MODEL_NAME}/")
+            if transform.child_frame_id == f"{self.model_name}/chassis"
+            or transform.child_frame_id == self.model_name
+            or transform.child_frame_id.startswith(f"{self.model_name}/")
         }
-        for name in (f"{MODEL_NAME}/chassis", MODEL_NAME):
+        for name in (f"{self.model_name}/chassis", self.model_name):
             if name in candidates:
                 self.truth = candidates[name]
                 self.truth_frame = name
@@ -399,8 +404,8 @@ def cmd_a3(node, args):
     cross_samples = sum(
         1
         for _t, x, y in trace
-        if TUNNEL_RECT[0] <= x <= TUNNEL_RECT[1]
-        and TUNNEL_RECT[2] <= y <= TUNNEL_RECT[3]
+        if node.tunnel_rect[0] <= x <= node.tunnel_rect[1]
+        and node.tunnel_rect[2] <= y <= node.tunnel_rect[3]
     )
     elapsed = (
         (trace[-1][0] if trace else 0.0) if timed_out else time.monotonic() - send_start
@@ -431,6 +436,16 @@ def main(argv=None):
         default="/diesel/sentry",
         help="定位节点所在的 ROS namespace（计划文档 §1.5，默认 /diesel/sentry）",
     )
+    parser.add_argument(
+        "--field",
+        default="",
+        help="config/fields/ 下的场地规格名（隧道窗口与 A3 目标点来源）；留空用唯一那份",
+    )
+    parser.add_argument(
+        "--robot",
+        default="",
+        help="config/robots/ 下的机器人规格名（真值帧名的模型名来源）；留空用唯一那份",
+    )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     ready = subparsers.add_parser("ready", help="等整链就绪")
@@ -440,16 +455,30 @@ def main(argv=None):
     a2.add_argument("--duration", type=float, default=70.0, help="采样多少秒")
 
     a3 = subparsers.add_parser("a3", help="导航穿隧道可达")
-    a3.add_argument("--x", type=float, default=2.0, help="目标 x（隧道西侧）")
-    a3.add_argument("--y", type=float, default=7.4, help="目标 y（隧道中线）")
-    a3.add_argument("--yaw", type=float, default=math.pi, help="目标朝向（默认朝西）")
+    # 目标点默认取自场地规格（config/fields/<field>.yaml 的 acceptance.goal）：
+    # 换场地后默认目标必须跟着换，否则量的是上一块场地。
+    a3.add_argument("--x", type=float, default=None, help="目标 x（默认取场地规格）")
+    a3.add_argument("--y", type=float, default=None, help="目标 y（默认取场地规格）")
+    a3.add_argument(
+        "--yaw", type=float, default=None, help="目标朝向（默认取场地规格）"
+    )
     a3.add_argument("--deadline", type=float, default=300.0, help="等就绪的最长秒数")
     a3.add_argument("--timeout", type=float, default=240.0, help="单次导航的最长秒数")
 
     args, ros_args = parser.parse_known_args(argv[1:])
+
+    # 判据参数来自规格：场地（隧道窗口 / A3 目标点）与机器人（真值帧名的模型名）
+    share_dir = get_package_share_directory("diesel_simulation_bringup")
+    field = sim_profile.load_field_named(share_dir, args.field)
+    robot = sim_profile.load_robot_named(share_dir, args.robot)
+    if args.command == "a3":
+        args.x = field.goal[0] if args.x is None else args.x
+        args.y = field.goal[1] if args.y is None else args.y
+        args.yaw = field.goal[2] if args.yaw is None else args.yaw
+
     rclpy.init(args=remove_ros_args(ros_args))
 
-    node = AcceptNode(args)
+    node = AcceptNode(args, field, robot)
     try:
         if args.command == "ready":
             return cmd_ready(node, args)

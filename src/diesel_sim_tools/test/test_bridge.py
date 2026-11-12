@@ -125,6 +125,33 @@ def test_same_topic_has_no_remapping():
     print("render: ROS 侧与 gz 侧同名时不产生 remapping OK")
 
 
+CONTRACT = (
+    LIDAR_ENTRY + "- id: clock\n"
+    "  gz_topic: /clock\n"
+    "  ros_type: rosgraph_msgs/msg/Clock\n"
+    "  gz_type: ignition.msgs.Clock\n"
+    "  direction: gz2ros\n" + "- id: cmd_vel\n"
+    "  gz_topic: /model/{robot}/cmd_vel\n"
+    "  ros_topic: /diesel/sentry/cmd_vel\n"
+    "  ros_type: geometry_msgs/msg/Twist\n"
+    "  gz_type: ignition.msgs.Twist\n"
+    "  direction: ros2gz\n"
+)
+
+
+def test_ros_endpoints():
+    entries = bridge.load(_write(CONTRACT))
+    endpoints = {item[0]: item for item in bridge.ros_endpoints(entries, CONTEXT)}
+    assert endpoints["lidar"][1] == "/livox/lidar", endpoints["lidar"]
+    assert endpoints["lidar"][2] == "gz2ros"
+    assert endpoints["cmd_vel"][1] == "/diesel/sentry/cmd_vel", endpoints["cmd_vel"]
+    assert endpoints["cmd_vel"][2] == "ros2gz"
+    # 没写 ros_topic 的条目，ROS 侧就是渲染后的话题名
+    assert endpoints["clock"][1] == "/clock", endpoints["clock"]
+    assert endpoints["clock"][3] is True
+    print("ros_endpoints: ROS 侧话题 / 方向 / 必需标记 OK")
+
+
 def main():
     test_render_expands_placeholders()
     test_direction_marks()
