@@ -135,6 +135,7 @@ diesel_simulation/
         │   ├── set_initial_pose.py            #   摆位 + 调定位 Relocalize
         │   ├── make_nav_map.py                #   官方栅格 → 导航栅格（清隧道顶投影）
         │   ├── accept.py                      #   A2/A3/A6 运行时验收（ready/a2/a3）
+        │   ├── tf_relay.py                    #   D28：全局 TF 中继进 /diesel/<robot>
         │   ├── sim_up.sh                      #   一键起整链（默认含 Nav2；--tune 调车视图）
         │   ├── tune_rqt.sh                    #   调车 rqt 面板组（缺哪个少哪个）
         │   └── tune_report.py                 #   话题/TF/定位健康快照（--json 可脚本化）
