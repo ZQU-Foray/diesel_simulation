@@ -1,0 +1,13 @@
+# diesel_localization 地图清单（由 scripts/make_manifest.py 生成，勿手改）
+version: 1.0.0
+frame_id: map
+origin: [-0.400, -0.400, 0.000]
+resolution: 0.025
+width: 512
+height: 352
+pcd_file: rmul_2027.pcd
+grid_file: rmul_2027.pgm
+pcd_sha256: 7915f37f9fe9caf9405a489aeb7a0dc828ffe4a0cdd6e84aac3e3ae714fdc775
+grid_sha256: cbc170a5cbb36ae33a24e7179b576bb345574816276ddf12bfcf6f3d43431801
+created_at: 2026-10-16T00:00:00Z
+source: RMUL 2027 3v3 官方 STEP（规则手册 V1.0.0 §3.2）

@@ -1,0 +1,38 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+    <name>diesel_simulation_bringup</name>
+    <version>0.1.0</version>
+    <description>
+        RMUL 2027 仿真启动层：把 Gazebo 场地、机器人模型、ros_gz 桥、point_lio 里程计、
+        diesel_localization 重定位与 Nav2 寻路串成一条可复现的链路。借鉴 SMBU 系仿真仓的
+        机器人模型与桥接配置（见 THIRD_PARTY_NOTICES）。
+    </description>
+    <maintainer email="ryanz@example.com">RyanZ</maintainer>
+    <license>Apache-2.0</license>
+
+    <buildtool_depend>ament_cmake</buildtool_depend>
+
+    <exec_depend>launch</exec_depend>
+    <exec_depend>launch_ros</exec_depend>
+    <exec_depend>ros_gz_sim</exec_depend>
+    <exec_depend>ros_gz_bridge</exec_depend>
+    <exec_depend>diesel_rmul_2027_field</exec_depend>
+    <exec_depend>diesel_localization_ros</exec_depend>
+    <exec_depend>diesel_localization_bringup</exec_depend>
+    <exec_depend>point_lio</exec_depend>
+    <exec_depend>ign_sim_pointcloud_tool</exec_depend>
+    <exec_depend>nav2_bringup</exec_depend>
+    <exec_depend>pb2025_robot_description</exec_depend>
+    <exec_depend>rmoss_gz_base</exec_depend>
+    <exec_depend>robot_state_publisher</exec_depend>
+    <exec_depend>tf2_ros</exec_depend>
+    <exec_depend>xacro</exec_depend>
+    <exec_depend>rviz2</exec_depend>
+
+    <test_depend>ament_cmake_test</test_depend>
+
+    <export>
+        <build_type>ament_cmake</build_type>
+    </export>
+</package>

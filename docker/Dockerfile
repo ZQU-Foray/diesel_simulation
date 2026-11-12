@@ -23,8 +23,8 @@ RUN pip3 install --no-cache-dir vcstool2 xmacro
 # / livox_ros_driver2 / pb_omni_pid_pursuit_controller / pb_teleop_twist_joy 都是子模块，必须递归拉取。
 # 只有 pb2025_sentry_nav 取 dev（point_lio / ign_sim_pointcloud_tool / 控制器在其中）。
 RUN set -eux; \
-    mkdir -p /opt/foray_sim_ws/src; \
-    cd /opt/foray_sim_ws/src; \
+    mkdir -p /opt/diesel_ws/src; \
+    cd /opt/diesel_ws/src; \
     git clone --quiet https://github.com/gezp/sdformat_tools.git; \
     git -C sdformat_tools checkout --quiet 47c2d1a37372281e5627d444f7537efc0bba11df; \
     git clone --quiet https://github.com/SMBU-PolarBear-Robotics-Team/rmoss_interfaces.git; \
@@ -41,7 +41,7 @@ RUN set -eux; \
     git -C pb2025_sentry_nav checkout --quiet 5f645d60e8cb88440f0bb44fc63209f136a95a49; \
     git -C pb2025_sentry_nav submodule update --init --recursive --quiet
 
-# Livox-SDK2：livox_ros_driver2 → point_lio 的依赖；版本与 foray_ws/.repos 的 pin 一致
+# Livox-SDK2：livox_ros_driver2 → point_lio 的依赖；版本与 diesel_ws/.repos 的 pin 一致
 RUN set -eux; \
     cd /tmp; \
     git clone --quiet https://github.com/Livox-SDK/Livox-SDK2.git; \
@@ -52,12 +52,12 @@ RUN set -eux; \
 
 RUN set -o pipefail; set -ex; \
     source /opt/ros/humble/setup.bash; \
-    cd /opt/foray_sim_ws; \
+    cd /opt/diesel_ws; \
     colcon build --continue-on-error --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release \
         > /tmp/colcon.log 2>&1 || true; \
     grep -E "Summary:|Failed   <<<|Aborted <<<" /tmp/colcon.log | tail -20 || true; \
     grep -B2 -A8 "CMake Error\|error:" /tmp/colcon.log | head -60 || true
 
-RUN echo 'source /opt/foray_sim_ws/install/setup.bash' >> /ros_entrypoint.sh
+RUN echo 'source /opt/diesel_ws/install/setup.bash' >> /ros_entrypoint.sh
 
 WORKDIR /ws

@@ -7,9 +7,9 @@
 
 | 上游仓 | 本仓借鉴的内容 | 位置 |
 |---|---|---|
-| [`rmu_gazebo_simulator`](https://github.com/SMBU-PolarBear-Robotics-Team/rmu_gazebo_simulator) | Gazebo 世界插件组合（physics / scene-broadcaster / user-commands / sensors + `ogre2`）、`ros_gz_bridge` 话题映射写法、机器人 spawn 流程 | `src/foray_simulation_bringup/` |
+| [`rmu_gazebo_simulator`](https://github.com/SMBU-PolarBear-Robotics-Team/rmu_gazebo_simulator) | Gazebo 世界插件组合（physics / scene-broadcaster / user-commands / sensors + `ogre2`）、`ros_gz_bridge` 话题映射写法、机器人 spawn 流程 | `src/diesel_simulation_bringup/` |
 | [`pb2025_robot_description`](https://github.com/SMBU-PolarBear-Robotics-Team/pb2025_robot_description) | 机器人 SDF 宏的组织方式；Mid-360 的 `gpu_lidar` / `imu` 参数口径（32 线、`update_rate`、`samples`、range、噪声） | 通过 `xacro` 复用，未复制文件 |
-| [`pb2025_sentry_nav`](https://github.com/SMBU-PolarBear-Robotics-Team/pb2025_sentry_nav) | `point_lio` 参数口径、`ign_sim_pointcloud_tool` 补 `time` 字段的必要性、Nav2 参数分节结构 | `src/foray_simulation_bringup/config/` |
+| [`pb2025_sentry_nav`](https://github.com/SMBU-PolarBear-Robotics-Team/pb2025_sentry_nav) | `point_lio` 参数口径、`ign_sim_pointcloud_tool` 补 `time` 字段的必要性、Nav2 参数分节结构 | `src/diesel_simulation_bringup/config/` |
 | `rmoss_gz_base` / `rmoss_core` / `rmoss_interfaces` / `sdformat_tools` | 底盘驱动与 SDF→URDF 转换 | 通过依赖引用，未复制文件 |
 
 上述仓以 **Apache License 2.0** 发布；本仓对其的引用不改变其许可证。复制片段处均在
@@ -17,7 +17,7 @@
 
 ## 2. guodong_sentry_sim 场地迁移包
 
-`src/foray_rmul_2027_field/` 下的网格、地图、场地复核参数与预览图来自迁移包
+`src/diesel_rmul_2027_field/` 下的网格、地图、场地复核参数与预览图来自迁移包
 `RMUL2027_map_transfer_20261016_STEP_R1`。该包 `SOURCE_NOTICE.txt` 原文要点：
 
 - 场地重建依据 **RoboMaster 2027 RMUL Rules V1.0.0（20261015）§3.2**；

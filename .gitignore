@@ -45,4 +45,4 @@ local/
 .dsh/
 
 # ---- 一次性分析报告（本地留存，不入库；需要时用 tools/ 里的脚本重跑）----
-src/foray_rmul_2027_field/docs/*_AUDIT.md
+src/diesel_rmul_2027_field/docs/*_AUDIT.md
