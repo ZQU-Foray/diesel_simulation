@@ -13,6 +13,8 @@
 #   a2     定位精度保持（复刻 decision.md D13 的口径）
 #   a3     Nav2 穿隧道可达：发 NavigateToPose 到隧道西侧，断言 SUCCEEDED 且轨迹采样点
 #          落进隧道顶投影（decision.md D16 的判定口径）
+#   link   虚拟下位机链路（README A11）：握手进 Active、固件状态帧持续到达、无帧错误，
+#          需要时再断言「停掉一端后 500 ms 内判活失败」
 #
 # 真值取 gz 的 /sim/pose_info（world 系 = map 系，官方图 origin 就是 world 坐标）；
 # 取不到真值时如实标 ground_truth=none 并把该项判据判失败，绝不放水（AGENTS.md）。
@@ -33,6 +35,7 @@ from rclpy.node import Node
 from rclpy.qos import QoSHistoryPolicy, QoSProfile, QoSReliabilityPolicy
 from rclpy.utilities import remove_ros_args
 from sensor_msgs.msg import PointCloud2
+from std_msgs.msg import String
 from tf2_msgs.msg import TFMessage
 from tf2_ros import Buffer, TransformListener
 
@@ -52,6 +55,21 @@ A2_MAX_YAW_ERR_DEG = 5.0
 # 轨迹采样率：5 Hz 足以在 0.8 m 宽、1.0 m/s 上限的隧道里取到多个点（穿过 0.35 m 金属顶
 # 投影段约 0.35–0.5 s，至少 2 个采样点）
 TRACE_HZ = 5.0
+
+# 下位机链路的判据（README A10/A11）
+# 判活门限 500 ms 是 robolink v0.2 的规格值；上位机状态机按 20 ms 循环采样，
+# 所以检出延迟允许比门限多两个循环（40 ms）的量化误差。
+LINK_TIMEOUT_MS = 500.0
+LINK_DETECT_SLACK_MS = 40.0
+
+# 固件状态帧的名义周期是 5 ms（200 Hz）。留 10 倍余量：只要还在流，就不该低于这个值；
+# 低于它说明状态帧断流（固件卡死或被挡住），而 link_state 可能还没超时。
+LINK_MIN_STATUS_HZ = 20.0
+
+# 进 Active 的那一刻，过渡桥刚跨过一个统计窗口，上报的 status_hz 还可能是 0（它统计的是
+# 「上一个发布周期里新到的帧数」）。所以采样前留一个窗口的预热，预热里的 0 不算断流；
+# 预热之后仍然为 0 就是真的断流。
+LINK_WARMUP_S = 1.0
 
 
 def log_kv(prefix="", **fields):
@@ -121,6 +139,9 @@ class AcceptNode(Node):
         self.last_reason = ""
         self.truth = None
         self.truth_frame = None
+        # 下位机链路的状态行（diesel_sim_mcu 每秒/每 100 ms 发一行 key=value 文本）
+        self.link_status = None
+        self.link_updates = 0
 
         sensor_qos = QoSProfile(
             reliability=QoSReliabilityPolicy.BEST_EFFORT,
@@ -136,12 +157,28 @@ class AcceptNode(Node):
         self.state_topic = state_topic
         self.create_subscription(LocalizationState, state_topic, self._on_state, 10)
         self.create_subscription(TFMessage, "/sim/pose_info", self._on_pose_info, 10)
+        self.link_topic = f"{self.namespace}/mcu_link/status"
+        self.create_subscription(String, self.link_topic, self._on_link_status, 10)
 
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
 
     def _on_lidar(self, _msg):
         self.lidar_frames += 1
+
+    def _on_link_status(self, msg):
+        """解析过渡桥的状态行：`link_state=Active hello_rtt_ms=20 status_frames=…`。
+
+        解析而不是字符串匹配，是因为验收要拿 `drop_detect_ms` 这类数值做断言
+        （README A11 的 500 ms 判据），只认子串会让「链路断了但延迟 3 s」也算通过。
+        """
+        fields = {}
+        for token in msg.data.split():
+            key, sep, value = token.partition("=")
+            if sep:
+                fields[key] = value
+        self.link_status = fields
+        self.link_updates += 1
 
     def _on_state(self, msg):
         self.state_msg = msg
@@ -357,6 +394,151 @@ def cmd_a2(node, args):
     return 0 if ok else 1
 
 
+def _as_float(fields, key):
+    """从状态行里取浮点；缺失或 `none` 返回 None（不把未知当 0）。"""
+    value = fields.get(key)
+    if value is None or value == "none":
+        return None
+    try:
+        return float(value)
+    except ValueError:
+        return None
+
+
+def cmd_link(node, args):
+    """A11：虚拟下位机链路可用性。
+
+    判据（README A11）：
+      * 握手在 `--deadline` 内进 `Active`（`link_state=Active` 且 `hello_rtt_ms` 有值）；
+      * 固件状态帧持续到达，速率不低于 `LINK_MIN_STATUS_HZ`；
+      * `frame_errors` 为 0（坏帧说明虚拟 CDC 在改字节或线路不稳）；
+      * 给了 `--expect-drop` 时：链路必须真的掉到非 Active，且过渡桥上报的
+        `drop_detect_ms` ≤ 500 ms + 两个循环的量化误差。
+
+    `--expect-drop` 用来说明「现在请把一端停掉」：脚本在采样窗口里等这个事件，
+    由人来停（这是验收，不是自动化压测），停不下来就是 FAIL——宁可不通过，
+    也不能把「链路一直没断」当成「失联检测正常」。
+    """
+    deadline = time.monotonic() + args.deadline
+    while time.monotonic() < deadline:
+        rclpy.spin_once(node, timeout_sec=0.05)
+        status = node.link_status
+        if status and status.get("link_state") == "Active":
+            break
+    status = node.link_status
+    if not status or status.get("link_state") != "Active":
+        log_kv(
+            "link ",
+            link_state=(status or {}).get("link_state", "none"),
+            hello_rtt_ms=(status or {}).get("hello_rtt_ms", "none"),
+            status_hz="none",
+            frame_errors=(status or {}).get("frame_errors", "none"),
+            topic=node.link_topic,
+            verdict="FAIL",
+        )
+        print(
+            "FAIL 链路没进 Active：确认 firmware_sim 与 virtual_cdc 在跑、"
+            "桥的 port 与 virtual_cdc 的 --host-link 是同一个路径",
+            flush=True,
+        )
+        return 1
+
+    hello_rtt = _as_float(status, "hello_rtt_ms")
+    # 状态帧速率由过渡桥自己统计（它按主循环采样，比在验收侧估算准）：这里取最小值，
+    # 采样窗口里只要有一拍断流就会被抓到。起点必须是 None 而不是握手那一拍的读数——
+    # 那一拍可能正好是桥刚跨统计窗口的 0（见 LINK_WARMUP_S）。
+    status_hz_seen = None
+    starved = False
+    zero_since = None
+    start = time.monotonic()
+    frame_errors = int(_as_float(status, "frame_errors") or 0)
+    drop_detect = None
+    dropped = False
+
+    while time.monotonic() - start < args.duration:
+        rclpy.spin_once(node, timeout_sec=0.05)
+        current = node.link_status
+        if not current:
+            continue
+        frame_errors = max(frame_errors, int(_as_float(current, "frame_errors") or 0))
+        if current.get("link_state") != "Active":
+            dropped = True
+            reported = _as_float(current, "drop_detect_ms")
+            if reported is not None:
+                drop_detect = reported
+            continue
+        if time.monotonic() - start < LINK_WARMUP_S:
+            continue
+        # 断流/掉线之后 status_hz 必然是 0（链路没了就没有状态帧），那是预期结果而不是
+        # 故障，所以只在 Active 的采样里取最小值——否则 --expect-drop 永远报「速率过低」。
+        reported_hz = _as_float(current, "status_hz")
+        if reported_hz is None:
+            continue
+        if reported_hz > 0.0:
+            zero_since = None
+            status_hz_seen = (
+                reported_hz
+                if status_hz_seen is None
+                else min(status_hz_seen, reported_hz)
+            )
+            continue
+        # 速率掉到 0 但链路还报 Active：这可能是「刚刚断流、判活门限还没到」的正常过渡
+        # （500 ms 之内），也可能是真的卡死。只有持续超过门限才算故障——否则
+        # --expect-drop 每次都会在掉线前那 500 ms 里量到一个 0。
+        if zero_since is None:
+            zero_since = time.monotonic()
+        elif (time.monotonic() - zero_since) * 1000.0 > LINK_TIMEOUT_MS:
+            starved = True
+
+    status_hz = status_hz_seen if status_hz_seen is not None else 0.0
+
+    problems = []
+    if hello_rtt is None:
+        problems.append("握手耗时没有上报（hello_rtt_ms=none）")
+    if starved:
+        problems.append(
+            f"状态帧断流超过 {LINK_TIMEOUT_MS:.0f} ms 而链路仍报 Active（固件没发或没在解析）"
+        )
+    elif status_hz_seen is None:
+        # 采样窗口里没抓到任何稳定期样本：要么断流来得比预热还早，要么链路根本没稳住。
+        # 这时不能把 0 当成「测得速率 0」，否则报告会指向错误的原因。
+        problems.append(
+            "状态帧速率未测到（采样期没有覆盖到链路稳定期；把停一端的时间往后推，"
+            f"或加长 --duration，预热窗口是 {LINK_WARMUP_S:.0f} s）"
+        )
+    elif status_hz_seen < LINK_MIN_STATUS_HZ:
+        problems.append(
+            f"状态帧速率 {status_hz:.1f} Hz 低于 {LINK_MIN_STATUS_HZ:.0f} Hz"
+        )
+    if frame_errors != 0:
+        problems.append(f"出现 {frame_errors} 个坏帧")
+
+    if args.expect_drop:
+        if not dropped:
+            problems.append("要求失联但链路一直保持 Active（一端没被停掉？）")
+        elif drop_detect is None:
+            problems.append("链路掉了，但过渡桥没有上报 drop_detect_ms")
+        elif drop_detect > LINK_TIMEOUT_MS + LINK_DETECT_SLACK_MS:
+            problems.append(
+                f"失联检出 {drop_detect:.0f} ms 超过门限 "
+                f"{LINK_TIMEOUT_MS:.0f}+{LINK_DETECT_SLACK_MS:.0f} ms"
+            )
+
+    detail = {
+        "link_state": (node.link_status or status).get("link_state", "none"),
+        "hello_rtt_ms": f"{hello_rtt:.0f}" if hello_rtt is not None else "none",
+        "status_hz": f"{status_hz:.1f}",
+        "frame_errors": frame_errors,
+        "drop_detect_ms": f"{drop_detect:.0f}" if drop_detect is not None else "none",
+        "topic": node.link_topic,
+        "verdict": "FAIL" if problems else "PASS",
+    }
+    log_kv("link ", **detail)
+    for problem in problems:
+        print(f"FAIL {problem}", flush=True)
+    return 1 if problems else 0
+
+
 def cmd_a3(node, args):
     """A3：Nav2 必须穿隧道到达西侧目标点（decision.md D16 的判定口径）。"""
     ok, marks, _lifecycle_checked = wait_ready(node, args.deadline)
@@ -503,6 +685,17 @@ def main(argv=None):
     a3.add_argument("--deadline", type=float, default=300.0, help="等就绪的最长秒数")
     a3.add_argument("--timeout", type=float, default=240.0, help="单次导航的最长秒数")
 
+    link = subparsers.add_parser("link", help="虚拟下位机链路（A11）")
+    link.add_argument(
+        "--deadline", type=float, default=60.0, help="等握手进 Active 的最长秒数"
+    )
+    link.add_argument("--duration", type=float, default=10.0, help="采样多少秒")
+    link.add_argument(
+        "--expect-drop",
+        action="store_true",
+        help="采样期要求链路真的掉线（配合人工停一端），并断言 500 ms 内检出",
+    )
+
     args, ros_args = parser.parse_known_args(argv[1:])
 
     # 判据参数来自规格：场地（隧道窗口 / A3 目标点）与机器人（真值帧名的模型名）
@@ -526,6 +719,8 @@ def main(argv=None):
             return cmd_ready(node, args)
         if args.command == "a2":
             return cmd_a2(node, args)
+        if args.command == "link":
+            return cmd_link(node, args)
         return cmd_a3(node, args)
     finally:
         node.destroy_node()
