@@ -16,7 +16,8 @@ install(
 install(
     PROGRAMS scripts/make_pcd.py scripts/make_manifest.py scripts/make_nav_map.py
              scripts/set_initial_pose.py scripts/accept.py scripts/tf_relay.py
-             scripts/sim_up.sh scripts/tune_rqt.sh scripts/tune_report.py
+             scripts/virtual_cdc.py scripts/sim_up.sh scripts/tune_rqt.sh
+             scripts/tune_report.py
     DESTINATION lib/${PROJECT_NAME}
 )
 
@@ -87,6 +88,14 @@ if(BUILD_TESTING)
         COMMAND python3 test/test_navigation_sim_tf_remap.py
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     )
+
+    # A10：虚拟 CDC 必须逐字节透传（改写字节会让 RoboLink 的 CRC 以极难定位的姿态失败）
+    add_test(
+        NAME virtual_cdc
+        COMMAND python3 test/test_virtual_cdc.py
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+    set_tests_properties(virtual_cdc PROPERTIES TIMEOUT 60)
 endif()
 
 ament_package()
