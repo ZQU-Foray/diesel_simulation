@@ -15,7 +15,7 @@ install(
 
 install(
     PROGRAMS scripts/make_pcd.py scripts/make_manifest.py scripts/make_nav_map.py
-             scripts/set_initial_pose.py scripts/accept.py
+             scripts/set_initial_pose.py scripts/accept.py scripts/tf_relay.py
              scripts/sim_up.sh scripts/tune_rqt.sh scripts/tune_report.py
     DESTINATION lib/${PROJECT_NAME}
 )
@@ -78,6 +78,13 @@ if(BUILD_TESTING)
     add_test(
         NAME localization_sim_tf
         COMMAND python3 test/test_localization_sim_launch.py
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+
+    # M12：Nav2 进 namespace 后 tf/tf_static 必须拉回绝对名（否则代价地图永远等不到 odom）
+    add_test(
+        NAME navigation_sim_tf_remap
+        COMMAND python3 test/test_navigation_sim_tf_remap.py
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     )
 endif()

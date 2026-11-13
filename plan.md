@@ -22,8 +22,18 @@
       `/odometry`，`bridge.yaml` 的 `ros_topic` 改 `/diesel/sentry/cmd_vel`；
       桥的 `gz_topic` 仍是 `/model/diesel_sim_robot/cmd_vel`。
 - [x] `accept.py` 支持命名空间：生命周期探针与 `NavigateToPose` 走 `<ns>/...`。
-- [ ] 起链回执：当前工作区自编栈仍有 `4/6 不可观` → LOST（见 D27「已知未决」），
-      待点云变稀的原因查清后再取 `ready=PASS` 回执。
+- [x] TF 话题拉回绝对名（D28）：Nav2 节点的 tf2 监听器按相对名订阅，进 namespace 后
+      落到 `/diesel/sentry/tf`（实测 5 订阅 / 0 发布），代价地图永远等不到 `odom`、
+      `bt_navigator` 卡 `inactive`。修法：`PushRosNamespace` 后紧跟
+      `SetRemap(src="tf", dst="/tf")` + `SetRemap(src="tf_static", dst="/tf_static")`；
+      回归用例 `test/test_navigation_sim_tf_remap.py` 注册为 ctest `navigation_sim_tf_remap`。
+- [x] 起链回执（2026-11-13，宿主直跑 `navigation_sim.launch.py headless:=true`，
+      `ROS_DOMAIN_ID=85`）：`ready=PASS ready_delay_s=0.94 lidar_s=0.1 localization_s=0.94
+      bt_navigator=active controller_server=active last_state=OK state_reason="warmup complete"`；
+      `a2 samples=5280 max_xy_err=0.034 lost=0 verdict=PASS`。
+      修前一模一样的命令是 `ready=FAIL ready_delay_s=timeout bt_navigator=inactive` +
+      346 条 `Invalid frame ID "odom"`。顺带说明 D27「已知未决」里 `4/6 不可观 → LOST`
+      这次没有复现（`last_state=OK`、`lost=0`），点云稠密度随起链时序波动，仍需跟踪。
 
 ## M11 联调缺陷整改（2026-11-12，分支 `fix/m11-body-tf`）
 
