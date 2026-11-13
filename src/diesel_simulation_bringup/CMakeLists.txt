@@ -96,6 +96,13 @@ if(BUILD_TESTING)
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     )
     set_tests_properties(virtual_cdc PROPERTIES TIMEOUT 60)
+
+    # A10：mcu_link 必须从 sim_up.sh 一路透到仿真层（漏转发只会静默退回直连 gz）
+    add_test(
+        NAME mcu_link_launch
+        COMMAND python3 test/test_mcu_link_launch.py
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    )
 endif()
 
 ament_package()

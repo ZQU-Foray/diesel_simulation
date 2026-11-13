@@ -90,6 +90,11 @@ def _assemble(context, share_dir):
             "y": LaunchConfiguration("y"),
             "yaw": LaunchConfiguration("yaw"),
             "robot_namespace": robot_namespace,
+            # 下位机链路（A10）只在这一层透传，动作仍由 simulation.launch.py 装配
+            "mcu_link": LaunchConfiguration("mcu_link"),
+            "mcu_link_host_port": LaunchConfiguration("mcu_link_host_port"),
+            "mcu_link_port": LaunchConfiguration("mcu_link_port"),
+            "mcu_firmware": LaunchConfiguration("mcu_firmware"),
         }.items(),
     )
 
@@ -267,6 +272,20 @@ def generate_launch_description():
             DeclareLaunchArgument("start_nav2", default_value="true"),
             # 定位实测：point_lio 4 s 起、初值 6 s 注入、/localization/state 首次 OK 约 8 s；
             # 25 s 留足软件渲染下的余量（accept.py ready 会打印实际 ready_delay_s）
+            DeclareLaunchArgument(
+                "mcu_link",
+                default_value="false",
+                description="走虚拟 USB CDC + 下位机固件（A10），默认直连 gz",
+            ),
+            DeclareLaunchArgument(
+                "mcu_link_host_port", default_value="/tmp/diesel_host"
+            ),
+            DeclareLaunchArgument("mcu_link_port", default_value="/tmp/diesel_mcu"),
+            DeclareLaunchArgument(
+                "mcu_firmware",
+                default_value="",
+                description="foray_mcu 的 firmware_sim 可执行文件路径；留空表示由外部自己起",
+            ),
             DeclareLaunchArgument(
                 "nav2_delay",
                 default_value="25.0",

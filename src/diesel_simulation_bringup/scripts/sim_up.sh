@@ -18,6 +18,8 @@ usage() {
   --rviz-config F RViz 视图（rviz/ 下的文件名，默认 sim.rviz；调车用 tune.rviz）
   --tune          调车一键：等价于 --rviz --rviz-config tune.rviz
   --rqt           同时拉起调车 rqt 面板组（缺哪个面板少哪个，不影响整链）
+  --mcu-link      走虚拟 USB CDC + 下位机固件（A10、D30），默认直连 gz
+  --mcu-firmware F 同时代起固件 host_sim（foray_mcu 的 firmware_sim 路径）
   --no-nav        只起仿真 + 定位，不起 Nav2
   --nav-delay S   Nav2 延后多少秒启动（默认取 launch 的 25.0）
   --x X           初始位姿 x（默认取 launch 的 6.0）
@@ -35,6 +37,7 @@ rqt=false
 with_nav=true
 nav_delay=""
 pose_args=()
+mcu_args=()
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -43,6 +46,8 @@ while [[ $# -gt 0 ]]; do
         --rviz-config) rviz_config="${2:?--rviz-config 需要一个视图文件名}"; shift 2 ;;
         --tune) rviz=true; rviz_config=tune.rviz; shift ;;
         --rqt) rqt=true; shift ;;
+        --mcu-link) mcu_args=("mcu_link:=true"); shift ;;
+        --mcu-firmware) mcu_args=("mcu_link:=true" "mcu_firmware:=${2:?--mcu-firmware 需要一个可执行文件路径}"); shift 2 ;;
         --no-nav) with_nav=false; shift ;;
         --nav-delay) nav_delay="${2:?--nav-delay 需要一个秒数}"; shift 2 ;;
         --x) pose_args+=("x:=${2:?--x 需要一个数值}"); shift 2 ;;
@@ -93,5 +98,6 @@ args+=("${pose_args[@]}")
 if [[ -n $nav_delay ]]; then
     args+=("nav2_delay:=$nav_delay")
 fi
+args+=("${mcu_args[@]}")
 
 exec ros2 launch diesel_simulation_bringup "$launch_file" "${args[@]}"

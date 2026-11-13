@@ -88,6 +88,11 @@ def _assemble(context, share_dir):
             "x": LaunchConfiguration("x"),
             "y": LaunchConfiguration("y"),
             "yaw": LaunchConfiguration("yaw"),
+            # 下位机链路（A10）：只做转发，具体动作在 simulation.launch.py 里
+            "mcu_link": LaunchConfiguration("mcu_link"),
+            "mcu_link_host_port": LaunchConfiguration("mcu_link_host_port"),
+            "mcu_link_port": LaunchConfiguration("mcu_link_port"),
+            "mcu_firmware": LaunchConfiguration("mcu_firmware"),
         }.items(),
     )
 
@@ -317,6 +322,21 @@ def generate_launch_description():
             # 故障注入开关（审计 L1/L2）：关掉即可复现「仿真没有 body 帧」，
             # 用于验证定位侧把缺帧表达成 LOST 而不是无限 INITIALIZING。
             DeclareLaunchArgument("body_tf", default_value="true"),
+            # 下位机链路（A10、D30）：默认关，打开后 /cmd_vel 经虚拟 USB CDC 交给固件
+            DeclareLaunchArgument(
+                "mcu_link",
+                default_value="false",
+                description="走虚拟 USB CDC + 下位机固件（A10），默认直连 gz",
+            ),
+            DeclareLaunchArgument(
+                "mcu_link_host_port", default_value="/tmp/diesel_host"
+            ),
+            DeclareLaunchArgument("mcu_link_port", default_value="/tmp/diesel_mcu"),
+            DeclareLaunchArgument(
+                "mcu_firmware",
+                default_value="",
+                description="foray_mcu 的 firmware_sim 可执行文件路径；留空表示由外部自己起",
+            ),
             OpaqueFunction(function=_assemble, kwargs={"share_dir": bringup_share}),
         ]
     )
