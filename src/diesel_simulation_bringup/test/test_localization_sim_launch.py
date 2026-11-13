@@ -108,7 +108,7 @@ def _in_launch_description(tree, variable):
     """断言变量作为某个动作列表的元素出现（第 3 条：定义了就必须启动）。
 
     动作列表有两种合法形态：直接写在 `LaunchDescription([...])` 里，或者由装配函数
-    `return [...]` 返回（D28 之后 launch 用 OpaqueFunction 按规格装配，列表在函数里）。
+    `return [...]` 返回（D29 之后 launch 用 OpaqueFunction 按规格装配，列表在函数里）。
     只认这两种，别处的同名列表不算数。
     """
     lists = []

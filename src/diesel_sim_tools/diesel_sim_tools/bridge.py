@@ -2,7 +2,7 @@
 """桥接契约：从 `config/bridge.yaml` 生成 `ros_gz_bridge` 的参数与重映射。
 
 契约里的 gz 话题是**模板**，用 `{world}` / `{robot}` / `{lidar_link}` 等占位符引用
-profile 的值（decision.md D28 第 2 条）。渲染后若还残留 `{...}`，说明占位符名字写错
+profile 的值（decision.md D29 第 2 条）。渲染后若还残留 `{...}`，说明占位符名字写错
 或 profile 缺字段——那正是「桥建起来了、日志不报错、数据全断」的成因（D20），
 所以必须在启动前失败，并指出是哪个条目。
 

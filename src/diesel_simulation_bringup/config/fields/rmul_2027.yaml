@@ -1,4 +1,4 @@
-# 场地规格（decision.md D28）：所有「换场地会变」的值都在这里。
+# 场地规格（decision.md D29）：所有「换场地会变」的值都在这里。
 #
 # 引用其他包的资源写成 {package, path}，读的时候经 ament 索引解析成绝对路径
 # （diesel_sim_tools/profile.py::_resolve）；只写字符串时按「相对本包 share」解析。

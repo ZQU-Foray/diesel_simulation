@@ -39,7 +39,7 @@ from tf2_ros import Buffer, TransformListener
 from diesel_sim_tools import bridge as bridge_contract
 from diesel_sim_tools import profile as sim_profile
 
-# 隧道窗口、A3 目标点与真值帧名来自场地/机器人规格（config/fields、config/robots，D28）。
+# 隧道窗口、A3 目标点与真值帧名来自场地/机器人规格（config/fields、config/robots，D29）。
 # 它们属于**装配输入**（世界几何、出发点、模型名），不是被测实现的定位/导航参数：验收脚本
 # 仍然独立于 diesel_localization 与 nav2 的配置，只是与启动仿真共用同一份规格——这样换场地
 # 后不会出现「launch 换了、验收还在量旧场地」的静默错判。

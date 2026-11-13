@@ -20,7 +20,7 @@
 # navigation_launch.py 不含 map_server，也不含 amcl——本仓定位已由 diesel_localization 负责，
 # 再起 amcl 会抢 map→odom）。
 #
-# 参数文件、派生导航图与帧名同样来自规格（config/fields、config/robots，D28）：
+# 参数文件、派生导航图与帧名同样来自规格（config/fields、config/robots，D29）：
 # 换场地换的是 nav2 参数与派生图，换机器人换的是雷达帧与 base 帧，本文件不写这些值。
 
 import os

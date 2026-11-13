@@ -5,7 +5,7 @@
 diesel_localization）与寻路（Nav2）分别在 localization_sim.launch.py /
 navigation_sim.launch.py 里，这样单独调点云时不必拖起整链。
 
-装配输入只有三份规格（decision.md D28）：`config/fields/<field>.yaml`（场地）、
+装配输入只有三份规格（decision.md D29）：`config/fields/<field>.yaml`（场地）、
 `config/robots/<robot>.yaml`（机器人）、`config/bridge.yaml`（桥接契约）。
 这里不书写世界路径、机器人路径或 gz 话题——它们全部来自规格，`field:=` / `robot:=`
 只在目录里有多份规格时才需要显式给出。

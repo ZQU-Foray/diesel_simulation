@@ -4,7 +4,7 @@
 profile 是**数据**，不带任何 gz 或 nav2 的知识：它只说「这个场地用哪个世界文件、
 官方地图与派生导航图在哪、验收目标点是多少」「这台机器人的机体 SDF 在哪、雷达装在
 哪条链路、视场多大」。把数据翻成命令行与参数是 `engine_gz` 与 launch 的事
-（decision.md D28 第 1 条）。
+（decision.md D29 第 1 条）。
 
 引用其他包的资源时写成 `{package: 包名, path: 包内相对路径}`，读的时候用
 ament 索引解析成绝对路径；只写字符串时按「相对本包 share」解析。
@@ -380,7 +380,7 @@ def assembly_context(field, robot):
 
     只暴露「换场地/换机器人会变」的量：世界名、gz 模型名、雷达链路与传感器名。
     刻意不放 ROS 话题名——那是契约自己的事，进 context 就等于鼓励在 profile 里
-    拼话题（D28 第 2 条）。
+    拼话题（D29 第 2 条）。
     """
     return {
         "world": field.name,

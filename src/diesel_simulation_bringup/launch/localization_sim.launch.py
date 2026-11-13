@@ -11,7 +11,7 @@
 # 定位节点用 `diesel_localization_bringup` 自带的兵种参数（sentry.yaml）当基线，
 # 只覆盖仿真相关项，避免两处默认值漂移。
 #
-# 雷达装位、线数、视场与地图目录全部来自规格（config/robots、config/fields，D28），
+# 雷达装位、线数、视场与地图目录全部来自规格（config/robots、config/fields，D29），
 # 本文件不写这些数值：换机器人或换场地时只改规格。
 
 

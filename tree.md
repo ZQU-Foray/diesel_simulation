@@ -102,7 +102,7 @@ diesel_simulation/
     │   │   └── rmul_2027.sdf                  #   唯一交付的世界（Fortress 口径）
     │   └── test/
     │       └── test_field_assets.py           #   资源断言：插件前缀、地图几何、网格可解析
-    ├── diesel_sim_tools/                       # 装配库：引擎调用 / 桥接契约 / profile（D28）
+    ├── diesel_sim_tools/                       # 装配库：引擎调用 / 桥接契约 / profile（D29）
     │   ├── package.xml                        #   ament_cmake + ament_python_install_package
     │   ├── CMakeLists.txt                     #   安装 Python 包 + 3 个单测
     │   ├── diesel_sim_tools/
