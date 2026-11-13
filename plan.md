@@ -107,6 +107,28 @@ Invalid frame ID "odom"`，costmap 永不激活 ⇒ `ready` 卡在 lifecycle。
 修后 `ready=PASS`、`a2` PASS（回执见 M12）。本重构分支 rebase 到 `dev` 后已带上该修复；
 原先另开的任务 `nav2-ns-tf-remap` 随之作废（需求记录已标注作废原因）。
 
+## M14 虚拟下位机链路（2026-11-13，分支 `feat/mcu-link-sim`）
+
+需求见 README §1 的 A10 / A11 与 §3.2；关键取舍见 `decision.md` D30。
+基线：`dev` 的 `9aba6e8`（含 PR #11 文档修正与 PR #13 技术栈归属表）。
+
+目标：`mcu_link:=true` 时 `/cmd_vel` 经虚拟 USB CDC 交给**下位机固件源码**（`foray_mcu` 的
+`host_sim` 后端），跑通 HELLO 握手、心跳、状态帧回读与 500 ms 判活，底盘速度再由过渡桥
+送回 gz。默认 `false`，不影响既有验收路径。
+
+- [ ] I25 `virtual_cdc.py`：PTY 对 + 双向中继 + 退出清理，`--echo-log` 与字节计数。
+- [ ] I26 `foray_mcu` 的 `platform/host_sim/`（`hal::UsbCdc` 落到 PTY、`hal::os` 用
+      `steady_clock`、其余外设复用 `platform/mock/`）+ `config/profiles/sim_dm_mc02/`
+      + `firmware_sim_dm_mc02` 目标（`host-tests` 预设内）。
+- [ ] I27 `simulation.launch.py` 的 `mcu_link` / `mcu_link_port` 参数与 `virtual_cdc` 装配。
+- [ ] I28 `diesel_sim_mcu` 过渡桥：从机侧会话 → `/diesel/<robot>/cmd_vel`；
+      `/sim/pose_info` → `GIMBAL_ATTITUDE` / `SYSTEM_STATUS` 回写；>500 ms 无帧归零。
+- [ ] I29 `accept.py link` 子命令：`link_state` / `hello_rtt_ms` / `status_hz` / `frame_errors`，
+      握手未完成或失联未在 500 ms 内触发即非零退出。
+- [ ] I30 收尾：`tree.md` / README / 门禁全绿；整链回执（ready、a2、link、失联归零）。
+
+回执：待补（本小节在代码落地后回填，含每轮 `ROS_DOMAIN_ID` / `GZ_PARTITION` 与原始输出）。
+
 ## M11 联调缺陷整改（2026-11-12，分支 `fix/m11-body-tf`）
 
 `diesel_localization/plan.md` M11 的仿真侧三项已落地并取证，本 PR（#6 → `dev`）：
