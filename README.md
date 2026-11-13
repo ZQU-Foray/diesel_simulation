@@ -26,14 +26,16 @@ ZQU-Foray 的 RMUL 2027 3v3 **场地仿真仓**：在 Gazebo 里搭出赛季场�
 
 ## 2. 技术栈
 
-| 项 | 选择 | 说明 |
+下表是**整链依赖**，不是本仓实现：本仓只交付配置、话题契约与验收脚本（见第 6-9 行的边界）。
+
+| 组件 | 归属 | 本仓职责 |
 |---|---|---|
-| ROS 2 | **Humble** | 与 `diesel_ws` 及本地容器工具链一致 |
-| 仿真器 | **Ignition Gazebo Fortress（gz-sim 6.18）** | 见 `decision.md` D1 |
-| 桥 | `ros_gz_bridge` / `ros_gz_sim` | Fortress 的 ROS 2 Humble 组合 |
-| 里程计 | `point_lio`（上游） | 仿真点云补 `time` 字段后可直接喂 |
-| 定位 | `diesel_localization` | 本仓只提供 manifest 与地图 |
-| 寻路 | `nav2_bringup` + `pb_omni_pid_pursuit_controller` | 参数从仿真实测标定 |
+| ROS 2 **Humble** | 整链基线 | 无，与 `diesel_ws` 及本地容器工具链保持一致 |
+| **Ignition Gazebo Fortress（gz-sim 6.18）** | 仿真器（本仓选择） | 装配与资产，见 `decision.md` D1 |
+| `ros_gz_bridge` / `ros_gz_sim` | 桥（本仓选择） | `config/bridge.yaml` 的桥接契约与渲染 |
+| `point_lio` | 上游算法，由 `diesel_localization` 依赖 | 仿真点云补 `time` 字段后可直接喂 |
+| `diesel_localization` | 上游仓 | 只提供 manifest 与地图（A4） |
+| `nav2_bringup` + `pb_omni_pid_pursuit_controller` | 下游仓 `diesel_navigation` | 提供场地与参数标定环境，参数从仿真实测标定 |
 
 ## 3. 包结构
 
