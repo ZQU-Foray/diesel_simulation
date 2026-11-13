@@ -28,8 +28,7 @@
 #include <rclcpp/rclcpp.hpp>
 #include <std_msgs/msg/string.hpp>
 
-namespace
-{
+namespace {
 
 // 控制快照的有效期提示：上位机每 20 ms 发一次，50 ms 覆盖两次发送的抖动；
 // 与固件侧上限（50 ms）一致（robolink v0.2 §4.7）。
@@ -57,46 +56,39 @@ constexpr int64_t LOOP_PERIOD_MS = 20;
 // 状态行之间隔得越久，能测到的失联检出时间越粗（1 Hz 时量化误差就有 1 s）。
 constexpr int64_t STATUS_PERIOD_MS = 100;
 
-std::int64_t now_ms()
-{
+std::int64_t now_ms() {
     return std::chrono::duration_cast<std::chrono::milliseconds>(
                std::chrono::steady_clock::now().time_since_epoch())
         .count();
 }
 
-std::string state_name(diesel::platform::link::HostLinkState state)
-{
+std::string state_name(diesel::platform::link::HostLinkState state) {
     using diesel::platform::link::HostLinkState;
-    switch (state)
-    {
-        case HostLinkState::Disconnected:
-            return "Disconnected";
-        case HostLinkState::HelloPending:
-            return "HelloPending";
-        case HostLinkState::Ready:
-            return "Ready";
-        case HostLinkState::Active:
-            return "Active";
+    switch (state) {
+    case HostLinkState::Disconnected:
+        return "Disconnected";
+    case HostLinkState::HelloPending:
+        return "HelloPending";
+    case HostLinkState::Ready:
+        return "Ready";
+    case HostLinkState::Active:
+        return "Active";
     }
     return "Unknown";
 }
 
-}  // namespace
+} // namespace
 
-namespace diesel_sim_mcu
-{
+namespace diesel_sim_mcu {
 
-class SimMcuBridge : public rclcpp::Node
-{
-public:
+class SimMcuBridge : public rclcpp::Node {
+  public:
     SimMcuBridge()
-    : rclcpp::Node("sim_mcu_bridge"),
-      command_topic_(declare_parameter<std::string>("cmd_vel_topic", "/diesel/sentry/cmd_vel")),
-      gz_topic_(declare_parameter<std::string>("gz_topic", "/model/diesel_sim_robot/cmd_vel")),
-      port_(declare_parameter<std::string>("port", "/tmp/diesel_host")),
-      host_(port_),
-      command_timeout_ms_(declare_parameter<int>("command_timeout_ms", COMMAND_TIMEOUT_MS))
-    {
+        : rclcpp::Node("sim_mcu_bridge"),
+          command_topic_(declare_parameter<std::string>("cmd_vel_topic", "/diesel/sentry/cmd_vel")),
+          gz_topic_(declare_parameter<std::string>("gz_topic", "/model/diesel_sim_robot/cmd_vel")),
+          port_(declare_parameter<std::string>("port", "/tmp/diesel_host")), host_(port_),
+          command_timeout_ms_(declare_parameter<int>("command_timeout_ms", COMMAND_TIMEOUT_MS)) {
         gz_publisher_ = gz_node_.Advertise<ignition::msgs::Twist>(gz_topic_);
 
         command_subscription_ = create_subscription<geometry_msgs::msg::Twist>(
@@ -107,7 +99,8 @@ public:
         const auto slash = command_topic_.find_last_of('/');
         const std::string prefix =
             slash == std::string::npos ? std::string() : command_topic_.substr(0, slash);
-        status_publisher_ = create_publisher<std_msgs::msg::String>(prefix + "/mcu_link/status", 10);
+        status_publisher_ =
+            create_publisher<std_msgs::msg::String>(prefix + "/mcu_link/status", 10);
 
         const auto start = now_ms();
         last_command_ms_ = start;
@@ -115,24 +108,23 @@ public:
 
         timer_ = create_wall_timer(std::chrono::milliseconds(LOOP_PERIOD_MS), [this]() { step(); });
 
-        RCLCPP_INFO(
-            get_logger(), "过渡桥已起：port=%s ros=%s gz=%s", port_path().c_str(),
-            command_topic_.c_str(), gz_topic_.c_str());
+        RCLCPP_INFO(get_logger(), "过渡桥已起：port=%s ros=%s gz=%s", port_path().c_str(),
+                    command_topic_.c_str(), gz_topic_.c_str());
     }
 
-private:
-    std::string port_path() const { return get_parameter("port").as_string(); }
+  private:
+    std::string port_path() const {
+        return get_parameter("port").as_string();
+    }
 
-    void on_command(const geometry_msgs::msg::Twist & message)
-    {
+    void on_command(const geometry_msgs::msg::Twist& message) {
         command_ = message;
         last_command_ms_ = now_ms();
         ++command_count_;
     }
 
     /// 把速度写进 gz 车体。链路断开时也必须走这里写 0，否则车会按最后一条指令一直开。
-    void publish_body(double vx, double vy, double wz)
-    {
+    void publish_body(double vx, double vy, double wz) {
         ignition::msgs::Twist message;
         message.mutable_linear()->set_x(vx);
         message.mutable_linear()->set_y(vy);
@@ -140,8 +132,8 @@ private:
         gz_publisher_.Publish(message);
     }
 
-    diesel::platform::link::ControlSnapshot snapshot(const geometry_msgs::msg::Twist & command) const
-    {
+    diesel::platform::link::ControlSnapshot
+    snapshot(const geometry_msgs::msg::Twist& command) const {
         diesel::platform::link::ControlSnapshot snapshot;
         snapshot.source = SOURCE_PC;
         snapshot.mode = MODE_AUTO_NAV;
@@ -160,18 +152,15 @@ private:
     /// `control_msg_age_ms`——固件第一版是应用层填这个字段，`app/pc_link` 目前只记账，
     /// 它恒为初值 `0xFFFF`（"没有快照"），拿它当判据会让闸门永远关着。
     /// 也不用「回读序号 ≥ 已发条数」：序号回读天然滞后一拍，链路丢一帧就永远追不上。
-    bool firmware_confirms() const
-    {
-        if (queued_controls_ == 0U || !host_.latest_status().has_value())
-        {
+    bool firmware_confirms() const {
+        if (queued_controls_ == 0U || !host_.latest_status().has_value()) {
             return false;
         }
-        const auto & status = *host_.latest_status();
+        const auto& status = *host_.latest_status();
         return status.link_state == LINK_STATE_ACTIVE && status.last_rx_control_seq > 0U;
     }
 
-    void step()
-    {
+    void step() {
         const auto now = now_ms();
         const auto previous_state = last_state_;
         const auto state = host_.step(static_cast<std::uint64_t>(now));
@@ -182,23 +171,20 @@ private:
         // 是 500 ms，加上 20 ms 的循环粒度，实测应在 500–520 ms 之间。
         if (previous_state == diesel::platform::link::HostLinkState::Active &&
             state == diesel::platform::link::HostLinkState::Disconnected &&
-            last_status_rx_ms_ >= 0)
-        {
+            last_status_rx_ms_ >= 0) {
             drop_detect_ms_ = now - last_status_rx_ms_;
         }
 
         // 握手耗时从「第一次发出 HELLO」量到「对端应答」，不是从进程启动量：
         // 固件可能比桥晚起几秒，那段时间不该算进握手延迟。
         using diesel::platform::link::HostLinkState;
-        if (state != HostLinkState::Disconnected && hello_started_ms_ < 0)
-        {
+        if (state != HostLinkState::Disconnected && hello_started_ms_ < 0) {
             hello_started_ms_ = now;
         }
         // 固件在 READY 时会立刻发一帧完整状态，所以同一次 step 里就可能从
         // HelloPending 直接走到 Active，`Ready` 不一定被单独观察到；两个状态都算握手完成。
         const bool handshake_done = state == HostLinkState::Ready || state == HostLinkState::Active;
-        if (handshake_done && hello_rtt_ms_ < 0 && hello_started_ms_ >= 0)
-        {
+        if (handshake_done && hello_rtt_ms_ < 0 && hello_started_ms_ >= 0) {
             hello_rtt_ms_ = now - hello_started_ms_;
         }
 
@@ -206,20 +192,15 @@ private:
         const auto command = command_fresh ? command_ : geometry_msgs::msg::Twist();
 
         // 只有 Active 才允许发控制：Active 的含义是固件已经回过状态帧。
-        if (state == diesel::platform::link::HostLinkState::Active)
-        {
-            if (host_.queue_control(snapshot(command), static_cast<std::uint64_t>(now)))
-            {
+        if (state == diesel::platform::link::HostLinkState::Active) {
+            if (host_.queue_control(snapshot(command), static_cast<std::uint64_t>(now))) {
                 ++queued_controls_;
             }
         }
 
-        if (firmware_confirms() && command_fresh)
-        {
+        if (firmware_confirms() && command_fresh) {
             publish_body(command.linear.x, command.linear.y, command.angular.z);
-        }
-        else
-        {
+        } else {
             publish_body(0.0, 0.0, 0.0);
         }
 
@@ -230,15 +211,12 @@ private:
     }
 
     /// 数固件状态帧：`latest_status()` 在两次收帧之间不变，所以「uptime 变了」才算新帧。
-    void observe_status_frames(std::int64_t now)
-    {
-        if (!host_.latest_status().has_value())
-        {
+    void observe_status_frames(std::int64_t now) {
+        if (!host_.latest_status().has_value()) {
             return;
         }
-        const auto & status = *host_.latest_status();
-        if (status.uptime_ms == last_status_uptime_ms_)
-        {
+        const auto& status = *host_.latest_status();
+        if (status.uptime_ms == last_status_uptime_ms_) {
             return;
         }
         last_status_uptime_ms_ = status.uptime_ms;
@@ -246,17 +224,14 @@ private:
         ++status_frames_;
     }
 
-    void publish_status(std::int64_t now, diesel::platform::link::HostLinkState state)
-    {
-        if (now - last_status_publish_ms_ < STATUS_PERIOD_MS)
-        {
+    void publish_status(std::int64_t now, diesel::platform::link::HostLinkState state) {
+        if (now - last_status_publish_ms_ < STATUS_PERIOD_MS) {
             return;
         }
         last_status_publish_ms_ = now;
 
         std::uint32_t crc_errors = 0U;
-        if (host_.latest_status().has_value() && host_.latest_status()->diagnostics.has_value())
-        {
+        if (host_.latest_status().has_value() && host_.latest_status()->diagnostics.has_value()) {
             crc_errors = host_.latest_status()->diagnostics->crc_errors;
         }
 
@@ -264,20 +239,19 @@ private:
         // 「桥实际观察到的状态帧速率」（固件本身发 200 Hz），断流时掉到 0——
         // 这正是 A11 要抓的现象。
         const double status_hz =
-            static_cast<double>(status_frames_ - last_reported_status_frames_) *
-            1000.0 / static_cast<double>(STATUS_PERIOD_MS);
+            static_cast<double>(status_frames_ - last_reported_status_frames_) * 1000.0 /
+            static_cast<double>(STATUS_PERIOD_MS);
         last_reported_status_frames_ = status_frames_;
 
         std_msgs::msg::String message;
-        message.data = "link_state=" + state_name(state) + " hello_rtt_ms=" +
-                       (hello_rtt_ms_ < 0 ? std::string("none") : std::to_string(hello_rtt_ms_)) +
-                       " status_frames=" + std::to_string(status_frames_) +
-                       " status_hz=" + std::to_string(static_cast<int>(status_hz)) +
-                       " frame_errors=" + std::to_string(crc_errors) +
-                       " controls=" + std::to_string(command_count_) +
-                       " drop_detect_ms=" +
-                       (drop_detect_ms_ < 0 ? std::string("none")
-                                            : std::to_string(drop_detect_ms_));
+        message.data =
+            "link_state=" + state_name(state) + " hello_rtt_ms=" +
+            (hello_rtt_ms_ < 0 ? std::string("none") : std::to_string(hello_rtt_ms_)) +
+            " status_frames=" + std::to_string(status_frames_) +
+            " status_hz=" + std::to_string(static_cast<int>(status_hz)) +
+            " frame_errors=" + std::to_string(crc_errors) +
+            " controls=" + std::to_string(command_count_) + " drop_detect_ms=" +
+            (drop_detect_ms_ < 0 ? std::string("none") : std::to_string(drop_detect_ms_));
         status_publisher_->publish(message);
     }
 
@@ -310,10 +284,9 @@ private:
     std::uint32_t queued_controls_ = 0U;
 };
 
-}  // namespace diesel_sim_mcu
+} // namespace diesel_sim_mcu
 
-int main(int argc, char ** argv)
-{
+int main(int argc, char** argv) {
     rclcpp::init(argc, argv);
     rclcpp::spin(std::make_shared<diesel_sim_mcu::SimMcuBridge>());
     rclcpp::shutdown();
