@@ -19,53 +19,69 @@
 # `nav2_delay` 秒。map_server 与它自己的 lifecycle_manager 由本仓起（Nav2 的 stock
 # navigation_launch.py 不含 map_server，也不含 amcl——本仓定位已由 diesel_localization 负责，
 # 再起 amcl 会抢 map→odom）。
+#
+# 参数文件、派生导航图与帧名同样来自规格（config/fields、config/robots，D29）：
+# 换场地换的是 nav2 参数与派生图，换机器人换的是雷达帧与 base 帧，本文件不写这些值。
 
+import os
+
+from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import (
     DeclareLaunchArgument,
     GroupAction,
     IncludeLaunchDescription,
+    OpaqueFunction,
     TimerAction,
 )
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node, PushRosNamespace
-from launch_ros.substitutions import FindPackageShare
 
-# 与上游 pb2025_nav_bringup 仿真参数一致：点云里程计在 odom 系、雷达帧 front_mid360。
-# robot_base_frame 用 base_footprint（本车没有云台，上游这里是 gimbal_yaw）。
-LOAM_INTERFACE_PARAMS = {
-    "state_estimation_topic": "/aft_mapped_to_init",
-    "registered_scan_topic": "/cloud_registered",
-    "odom_frame": "odom",
-    "base_frame": "base_footprint",
-    "lidar_frame": "front_mid360",
-}
-
-SCAN_GENERATION_PARAMS = {
-    "lidar_frame": "front_mid360",
-    "base_frame": "base_footprint",
-    "robot_base_frame": "base_footprint",
-}
+from diesel_sim_tools import profile as sim_profile
 
 
-def generate_launch_description():
-    bringup_share = FindPackageShare("diesel_simulation_bringup")
-    localization_launch = PathJoinSubstitution(
-        [bringup_share, "launch", "localization_sim.launch.py"]
+def _loam_params(robot):
+    """loam_interface 的参数：与上游 pb2025_nav_bringup 仿真配置同口径。
+
+    `robot_base_frame` 用 `base_footprint`（本车没有云台，上游这里是 gimbal_yaw）。
+    """
+    return {
+        "state_estimation_topic": "/aft_mapped_to_init",
+        "registered_scan_topic": "/cloud_registered",
+        "odom_frame": "odom",
+        "base_frame": robot.base_frame,
+        "lidar_frame": robot.lidar.frame,
+    }
+
+
+def _scan_params(robot):
+    """sensor_scan_generation 的参数：把里程计补成 odom→base_footprint。"""
+    return {
+        "lidar_frame": robot.lidar.frame,
+        "base_frame": robot.base_frame,
+        "robot_base_frame": robot.base_frame,
+    }
+
+
+def _assemble(context, share_dir):
+    """按规格拼出整链的动作列表。"""
+    field = sim_profile.load_field_named(
+        share_dir, LaunchConfiguration("field").perform(context)
     )
-    nav2_launch = PathJoinSubstitution(
-        [FindPackageShare("nav2_bringup"), "launch", "navigation_launch.py"]
+    robot = sim_profile.load_robot_named(
+        share_dir, LaunchConfiguration("robot").perform(context)
     )
-    nav2_params = PathJoinSubstitution(
-        [bringup_share, "config", "nav2_params_sim.yaml"]
-    )
-    nav_map = PathJoinSubstitution([bringup_share, "map", "nav2", "rmul_2027_nav.yaml"])
+    robot_namespace = LaunchConfiguration("robot_namespace")
 
     localization = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(localization_launch),
+        PythonLaunchDescriptionSource(
+            os.path.join(share_dir, "launch", "localization_sim.launch.py")
+        ),
         launch_arguments={
+            "field": LaunchConfiguration("field"),
+            "robot": LaunchConfiguration("robot"),
             "headless": LaunchConfiguration("headless"),
             "gui": LaunchConfiguration("gui"),
             "rviz": LaunchConfiguration("rviz"),
@@ -73,7 +89,7 @@ def generate_launch_description():
             "x": LaunchConfiguration("x"),
             "y": LaunchConfiguration("y"),
             "yaw": LaunchConfiguration("yaw"),
-            "robot_namespace": LaunchConfiguration("robot_namespace"),
+            "robot_namespace": robot_namespace,
         }.items(),
     )
 
@@ -86,7 +102,7 @@ def generate_launch_description():
             output="screen",
             respawn=True,
             respawn_delay=2.0,
-            parameters=[dict(LOAM_INTERFACE_PARAMS, use_sim_time=True)],
+            parameters=[dict(_loam_params(robot), use_sim_time=True)],
         ),
         Node(
             package="sensor_scan_generation",
@@ -96,7 +112,7 @@ def generate_launch_description():
             # 依赖 base_footprint→front_mid360 静态 TF；TF 还没到时进程会退，靠 respawn 兜住
             respawn=True,
             respawn_delay=2.0,
-            parameters=[dict(SCAN_GENERATION_PARAMS, use_sim_time=True)],
+            parameters=[dict(_scan_params(robot), use_sim_time=True)],
         ),
     ]
 
@@ -104,14 +120,14 @@ def generate_launch_description():
         package="nav2_map_server",
         executable="map_server",
         name="map_server",
-        namespace=LaunchConfiguration("robot_namespace"),
+        namespace=robot_namespace,
         output="screen",
         parameters=[
-            nav2_params,
+            field.nav2_params,
             {
                 "use_sim_time": True,
                 # 派生图（只打开隧道开放段）而不是定位侧的官方图，理由见 decision.md D16
-                "yaml_filename": nav_map,
+                "yaml_filename": field.nav_map,
                 "topic_name": "map",
             },
         ],
@@ -121,7 +137,7 @@ def generate_launch_description():
         package="nav2_lifecycle_manager",
         executable="lifecycle_manager",
         name="lifecycle_manager_map",
-        namespace=LaunchConfiguration("robot_namespace"),
+        namespace=robot_namespace,
         output="screen",
         parameters=[
             {
@@ -167,14 +183,22 @@ def generate_launch_description():
             # 在这层挂 SetRemap 不生效（remap 不随 IncludeLaunchDescription 传播，
             # 子进程命令行没有 -r tf:=/tf），所以用中继喂命名空间（D28）。
             IncludeLaunchDescription(
-                PythonLaunchDescriptionSource(nav2_launch),
+                PythonLaunchDescriptionSource(
+                    os.path.join(
+                        get_package_share_directory("nav2_bringup"),
+                        "launch",
+                        "navigation_launch.py",
+                    )
+                ),
                 launch_arguments={
                     "use_sim_time": "true",
-                    "params_file": nav2_params,
+                    "params_file": field.nav2_params,
                     "autostart": "true",
                     "use_composition": "False",
                     "use_respawn": "False",
-                    "namespace": LaunchConfiguration("robot_namespace"),
+                    # Nav2 自己会按 root_key 重写参数键，这里给同一个名字，避免两处
+                    # namespace 口径不一致
+                    "namespace": robot_namespace,
                 }.items(),
             ),
         ],
@@ -196,8 +220,24 @@ def generate_launch_description():
         condition=IfCondition(LaunchConfiguration("start_nav2")),
     )
 
+    return [localization, *odom_bridge, rqt_tune, nav2_stack]
+
+
+def generate_launch_description():
+    bringup_share = get_package_share_directory("diesel_simulation_bringup")
+
     return LaunchDescription(
         [
+            DeclareLaunchArgument(
+                "field",
+                default_value="",
+                description="config/fields/ 下的场地规格名；留空用目录里唯一的那份",
+            ),
+            DeclareLaunchArgument(
+                "robot",
+                default_value="",
+                description="config/robots/ 下的机器人规格名；留空用目录里唯一的那份",
+            ),
             DeclareLaunchArgument("headless", default_value="false"),
             DeclareLaunchArgument("gui", default_value="false"),
             DeclareLaunchArgument("rviz", default_value="false"),
@@ -232,9 +272,6 @@ def generate_launch_description():
                 default_value="25.0",
                 description="延迟多少秒再起 Nav2（等 map→odom 与定位稳定）",
             ),
-            localization,
-            *odom_bridge,
-            rqt_tune,
-            nav2_stack,
+            OpaqueFunction(function=_assemble, kwargs={"share_dir": bringup_share}),
         ]
     )

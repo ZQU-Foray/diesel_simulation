@@ -1,0 +1,37 @@
+# 机器人规格（decision.md D29）：所有「换机器人 / 换雷达会变」的值都在这里。
+#
+# 数值来源：
+#   - model 名与传感器名：models/diesel_sim_robot/model.sdf 的 <model name> / <sensor name>；
+#   - 装位 0.08 / 0.0 / 0.27962：SDF 里 front_mid360 的 <pose>，279.62 mm 是迁移包
+#     parameters.json 的实测安装高度；
+#   - 视场 360° × 59°（-7°…+52°）：SDF 的 min_angle/max_angle，32 线对应 59/31=1.9032…；
+#   - ang_bottom 是「下沿角度的绝对值」，上游 point_cloud_converter.cpp:66 按
+#     row_id = (vertical_angle + ang_bottom) / ang_res_y 换算（D11）。
+# 上面的每个值都由 diesel_sim_tools/profile.py 校验（pose 六个分量、ang_res_y 与
+# vertical_fov_deg/(channels-1) 必须一致），不一致即启动失败。
+
+name: sentry
+
+# gz 侧模型名：gz 话题全名里用它占位（/world/{world}/model/{robot}/...）
+model: diesel_sim_robot
+sdf: {package: diesel_simulation_bringup, path: models/diesel_sim_robot/model.sdf}
+
+frames:
+  # 里程计与 Nav2 的机体帧；定位节点把 body 换算到 base_footprint 才收得下点云（D25）
+  base: base_footprint
+  body: body
+
+lidar:
+  link: front_mid360
+  sensor: front_mid360_lidar
+  imu_sensor: front_mid360_imu
+  frame: front_mid360
+  # [x, y, z, roll, pitch, yaw]，单位 m / rad，父帧是 frames.base
+  pose: [0.08, 0.0, 0.27962, 0.0, 0.0, 0.0]
+  channels: 32
+  # 每线采样数：1875 × 32 = 60000 点/帧（A1 的 width/height 口径）
+  horizontal_samples: 1875
+  horizontal_fov_deg: 360.0
+  vertical_fov_deg: 59.0
+  ang_res_y: 1.903225806451613
+  ang_bottom: 7.0

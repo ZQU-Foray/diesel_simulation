@@ -105,15 +105,25 @@ def _frames(call):
 
 
 def _in_launch_description(tree, variable):
-    """断言变量被放进了 `LaunchDescription([...])` 的列表里。"""
-    for call in _calls(tree, "LaunchDescription"):
-        for argument in call.args:
-            if not isinstance(argument, ast.List):
-                continue
+    """断言变量作为某个动作列表的元素出现（第 3 条：定义了就必须启动）。
 
-            for element in argument.elts:
-                if isinstance(element, ast.Name) and element.id == variable:
-                    return True
+    动作列表有两种合法形态：直接写在 `LaunchDescription([...])` 里，或者由装配函数
+    `return [...]` 返回（D29 之后 launch 用 OpaqueFunction 按规格装配，列表在函数里）。
+    只认这两种，别处的同名列表不算数。
+    """
+    lists = []
+    for call in _calls(tree, "LaunchDescription"):
+        lists.extend(node for node in call.args if isinstance(node, ast.List))
+    lists.extend(
+        node.value
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Return) and isinstance(node.value, ast.List)
+    )
+
+    for node in lists:
+        for element in node.elts:
+            if isinstance(element, ast.Name) and element.id == variable:
+                return True
 
     return False
 

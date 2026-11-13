@@ -1,0 +1,22 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+    <name>diesel_sim_tools</name>
+    <version>0.1.0</version>
+    <description>
+        仿真装配库：把「引擎调用 / 资产选择 / 桥接契约」收敛成可单测的纯 Python 函数，
+        launch 只负责把它们的产物拼成节点。分层与取舍见 README §3.1、decision.md D28。
+    </description>
+    <maintainer email="ryanz@example.com">RyanZ</maintainer>
+    <license>Apache-2.0</license>
+
+    <buildtool_depend>ament_cmake</buildtool_depend>
+    <buildtool_depend>ament_cmake_python</buildtool_depend>
+
+    <exec_depend>ament_index_python</exec_depend>
+    <exec_depend>python3-yaml</exec_depend>
+
+    <export>
+        <build_type>ament_cmake</build_type>
+    </export>
+</package>

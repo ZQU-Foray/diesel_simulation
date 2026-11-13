@@ -586,3 +586,44 @@ Consequences：`test/test_navigation_sim_tf_remap.py` 静态断言「同一个 `
 （`colcon test` 即跑，不用起仿真）。
 代价：`tf` 在命名空间里会被复制一份（带宽翻倍，仿真可接受）；实机把整栈放根命名空间时
 需 `tf_relay:=false`，否则中继节点的空 `target_namespace` 保护会直接退出（`SystemExit(2)`）。
+
+## D29 装配层解耦：引擎调用 / 资产选择 / 桥接契约都是声明式输入
+
+Context：三条 launch 把场次名（`simulation.launch.py:31` `WORLD_NAME = "rmul_2027"`）、
+机器人名（`:32` `ROBOT_NAME = "diesel_sim_robot"`）、gz 话题全名（`config/bridge.yaml:8`
+`/world/rmul_2027/model/diesel_sim_robot/link/front_mid360/sensor/...`）、验收目标点与隧道窗口
+（`scripts/accept.py:40` `TUNNEL_RECT`）分别写死在 Python、YAML 和脚本里。换个场次名或换个
+机器人名时桥接**照建、不报错、数据全断**（与 D20 同一类静默错接），换一套场地做几何与算法
+的交叉验证也无从下手。而 `simulation.launch.py:34-60` 的 `gz_bridge_arguments()` 已经是
+「从 `bridge.yaml` 生成 `parameter_bridge` 参数与 remappings」的生成器——解耦方向本来就在，
+只是停在半路：生成器只处理桥，场地/机器人/验收仍是字面量。
+
+Decision：
+
+1. **四层，launch 退化为解释器**。L0 资产层（`diesel_rmul_2027_field`，纯数据无节点）；
+   L1 引擎适配层（`diesel_sim_tools/engine_gz.py`：资源路径、世界启动参数、spawn 参数、
+   真值话题 是 gz 的唯一出口）；L2 桥接契约层（`config/bridge.yaml` + `bridge.render()`）；
+   L3 装配层（`config/fields/*.yaml` + `config/robots/*.yaml` 决定用哪个世界、哪台机器人、
+   哪些桥接件）；L4 验收层读 profile 的目标点与窗口。
+2. **桥接走「模板 + 占位符」，不做结构化派生**。gz 话题写成
+   `/world/{world}/model/{robot}/link/front_mid360/sensor/front_mid360_lidar/scan/points`，
+   不做 `kind/link/sensor` 三段拼装——拼装等于把 gz 的命名规则编码进 Python，换引擎或换
+   传感器就要改代码；模板让「gz 侧怎么写」留在声明里，reviewer 直接可读。占位符渲染后
+   **残留未替换即启动失败并指出条目 `id`**：这个话题写错不会报错、只会静默断流（D20）。
+3. **不拆资产包**。场地资产已独立成包；机器人只有一份 `model.sdf`，拆包不带来收益，却要
+   同步 `tree.md` 双向校验、CI 的 `dir-layout`、`docker/Dockerfile` 三处。
+4. **不做多引擎插件化、不做资产热切换、不把 nav2/定位参数 profile 化**。前者只有 Fortress
+   一个引擎（D1），此时抽象引擎接口是空壳，差异收敛到一个文件就够；资产热切换超出需求；
+   nav2 与定位参数属下游仓职责（README §8）。
+
+Reason：切换维度横跨 SDF 世界、gz 话题名、地图契约、验收目标点四个平面，只加一个
+`world:=` 参数会得到「能启动、没数据」的空链。声明式化的收益是**新增一路桥接件不改 Python**，
+而不是「支持多引擎」。
+
+Consequences：新增 A8（装配可配置）与 A9（桥接契约自检）两条需求，见 README §1；
+`accept.py ready` 承担契约自检，`bridge.yaml` 每条要写 `expect`（发布者/订阅者 + 频率）。
+等价性判据不是 A3 通过（A3 现为 FAIL），而是 A0–A2 回执与 **A3 失败指纹**（`path_len_m` /
+`max_xy_err` / `cross_samples` 量级、报错链顺序）与重构前一致。
+
+回退：库包与 YAML 读取是按提交切的等价替换，逐提交 `git revert` 即可；单条桥接件改回
+字面量话题只会让 A9 断言失败，不影响运行。

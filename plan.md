@@ -41,6 +41,72 @@
       346 条 `Invalid frame ID "odom"`。顺带说明 D27「已知未决」里 `4/6 不可观 → LOST`
       这次没有复现（`last_state=OK`、`lost=0`），点云稠密度随起链时序波动，仍需跟踪。
 
+## M13 装配层解耦（2026-11-12，分支 `feat/sim-assembly-decoupling`）
+
+需求见 README §1 的 A8 / A9 与 §3.1；关键取舍见 `decision.md` D29。
+基线：`dev` 的 `95cb331`（含 PR #9 命名空间统一与 PR #10 TF 中继）。原分支基线 `2639d93`
+未进 `dev`，故本分支 rebase 到 `dev` 后重取基线。
+基线回执（S0，改写前）：`a2 max_xy_err=0.033 lost=0 verdict=PASS`；S0 时 `ready` 卡 lifecycle
+（`Timed out waiting for transform` 1280 条）——该缺陷已由 PR #10 的 `tf_relay` 修掉，
+修后 `ready=PASS ready_delay_s=0.01 bt_navigator=active controller_server=active`（见 M12 回执）。
+
+- [x] I17 `diesel_sim_tools` 库包落地：`engine_gz.py`（资源路径 / 世界参数 / spawn 参数 /
+      真值话题）、`bridge.py`（契约渲染）、`profile.py`（场地与机器人规格读取）+ 单测。
+- [x] I18 桥接契约化：`bridge.yaml` 加 `id`、`{world}` / `{robot}` 占位、`expect`；
+      渲染后残留占位符即失败并指出 `id`。
+- [x] I19 profile 落盘：`config/fields/rmul_2027.yaml`、`config/robots/sentry.yaml`。
+- [x] I20 `simulation.launch.py` 接装配层：世界 SDF、机器人 SDF、spawn 位姿、资源路径不再写字面量。
+- [x] I21 `localization_sim.launch.py` 接装配层：雷达装位、线数、视场、帧名、manifest 目录来自 profile。
+- [x] I22 `navigation_sim.launch.py` 接装配层：nav2 参数文件与派生导航图路径来自 field profile。
+- [x] I23 `accept.py` 读 profile 的验收目标点与隧道窗口；`ready` 增加 A9 桥接契约自检。
+- [x] I24 收尾：`tree.md` / `README` / 门禁全绿（`check_style`、`check_tree_doc`、`check_layer`、`selftest`、ctest）。
+
+回执 A（2026-11-12，改写当期，分支基线 `2639d93`，宿主直跑）：
+
+- 静态门禁：`check_style.py` 文件卫生通过；`check_tree_doc.py` 双向一致；`check_layer.py`
+  依赖方向通过（layer=META）；`selftest.py` 5 条注入全被拦下；
+  `ruff check src` All checks passed；`black --check src` unchanged。
+- 单元/资产测试：`colcon test --packages-select diesel_sim_tools` 3/3；
+  `diesel_simulation_bringup` 7/7（manifest / pcd_align IoU=0.9331 / nav_map / tune_* / tf）。
+- 起链（`navigation_sim.launch.py headless:=true`，ROS_DOMAIN_ID=149 / GZ_PARTITION=i24c）：
+  RTF `0.9996`、`/livox/lidar` 9.104 Hz、height=32 width=1875、`bridge_missing=none`（A9 通过）、
+  `[Err]` 0；`ready=FAIL`（卡 lifecycle，与 S0 同一失败点）；`a2 max_xy_err=0.040 lost=0 PASS`；
+  `a3` 在 `wait_ready` 处异常退出。
+
+回执 B（2026-11-13，rebase 到 `dev` `95cb331` 之后复测，`ROS_DOMAIN_ID=155` /
+`GZ_PARTITION=asm2`，宿主 load≈5 / 24 核）：
+
+- 构建与测试：三包 `colcon build --symlink-install` 全通过；`colcon test` **12 tests /
+  0 failures**（bringup 8 个含 PR #10 的 `navigation_sim_tf_remap`、field 1、tools 3）；
+  `python3 -m pytest src/diesel_sim_tools/test -q` → **19 passed**；四道 CI 门禁全绿；
+  `ruff` / `black` 全绿。
+- `/livox/lidar` 9.992–9.996 Hz；`/diesel/sentry/tf` 的中继由 `tf_relay` 提供
+  （日志 `TF 中继已启动：/tf → /diesel/sentry/tf`）；launch 日志 `[Err]` 0、
+  `Invalid frame ID` 仅 4 条（中继起来之前的瞬时窗口）。
+- `ready=PASS ready_delay_s=0.64 lidar_s=0.09 localization_s=0.64 bt_navigator=active
+  controller_server=active last_state=OK state_reason="warmup complete" bridge_missing=none`
+  ——**A9 桥接契约自检在整链上通过，且 PR #10 的 TF 修复与本次装配改写兼容**。
+- `a2 samples=6789 first_ok_delay=0.00 max_xy_err=0.041 max_yaw=0.214 last_state=OK lost=0
+  ground_truth=diesel_sim_robot verdict=PASS`（S0 基线 0.033，同量级）。
+- `a3 result=ABORTED time_s=154.66 path_len_m=69.720 cross_samples=0 trace_samples=763
+  max_xy_err=10.508 ground_truth=diesel_sim_robot verdict=FAIL`：TF 修好后 A3 首次真正
+  跑到导航阶段，失败点回到**运动态定位发散**（误差 10.5 m、`Robot is out of bounds of the
+  costmap!` ×21、`GridBased failed` ×12），与 2026-11 审计结论一致——属 `diesel_localization`
+  / `point_lio` 跨仓问题，不在本仓职责内。
+
+等价性判据（D29）：重写前后以「A0–A2 回执 + A3 失败指纹」比对。A2 判据相同、误差同量级
+（0.041 对 0.033）；数据链、话题名、点云元数据（32×1875）、`/sim/pose_info` 真值帧名均一致；
+`ready` 由 FAIL 变 PASS 是因为 rebase 带入了 PR #10 的 TF 修复，不是本改写引入的行为差异
+（改写后 A9 自检与导航参数命中均可复核）。
+
+已知阻塞（**已解决，留档**）：命名空间化后 Nav2 各节点订阅 `<ns>/tf`、`<ns>/tf_static`，
+而 TF 由 `robot_state_publisher` / `body_static_tf` / `sensor_scan_generation` 发在全局
+`/tf`，`controller_server` 报 `Timed out waiting for transform from base_footprint to odom ...
+Invalid frame ID "odom"`，costmap 永不激活 ⇒ `ready` 卡在 lifecycle。
+**该缺陷已由 PR #10（`fix/nav2-tf-relay`，commit `6bd7daa`，决策 D28）用 `tf_relay` 中继修掉**，
+修后 `ready=PASS`、`a2` PASS（回执见 M12）。本重构分支 rebase 到 `dev` 后已带上该修复；
+原先另开的任务 `nav2-ns-tf-remap` 随之作废（需求记录已标注作废原因）。
+
 ## M11 联调缺陷整改（2026-11-12，分支 `fix/m11-body-tf`）
 
 `diesel_localization/plan.md` M11 的仿真侧三项已落地并取证，本 PR（#6 → `dev`）：

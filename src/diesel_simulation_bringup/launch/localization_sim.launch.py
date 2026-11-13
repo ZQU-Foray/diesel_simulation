@@ -10,8 +10,14 @@
 #
 # 定位节点用 `diesel_localization_bringup` 自带的兵种参数（sentry.yaml）当基线，
 # 只覆盖仿真相关项，避免两处默认值漂移。
+#
+# 雷达装位、线数、视场与地图目录全部来自规格（config/robots、config/fields，D29），
+# 本文件不写这些数值：换机器人或换场地时只改规格。
 
 
+import os
+
+from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import (
     DeclareLaunchArgument,
@@ -21,25 +27,14 @@ from launch.actions import (
 )
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
-from launch_ros.substitutions import FindPackageShare
 from nav2_common.launch import RewrittenYaml
 
-# 迁移包 parameters.json 的实测雷达安装高度（279.62 mm）
-LIDAR_POSE = ("0.08", "0.0", "0.27962", "0.0", "0.0", "0.0")
-
-# ign_sim_pointcloud_tool 按「垂直角 → 环号」重排点，参数必须与传感器视场一致：
-# samples=32、-7°…+52°（= -0.12217304764…0.90757121104 rad）→ ang_res_y = 59/31
-ANG_RES_Y = "1.903225806451613"
-# 注意 ang_bottom 是「下沿角度的绝对值」，不是带符号角度：上游
-# point_cloud_converter.cpp:66 的换算是 row_id = (vertical_angle + ang_bottom) / ang_res_y，
-# 传 -7.0 会让 row_id 只在垂直角 ≥ +7° 时成立——正常回波全被丢，只剩 atan2(inf, inf)=+45° 的
-# 无效点（见 decision.md D11）。上游默认值与 pb2025_nav_bringup 的仿真参数都用 7.0。
-ANG_BOTTOM = "7.0"
+from diesel_sim_tools import profile as sim_profile
 
 
-def _initial_pose(context, *args, **kwargs):
+def _initial_pose(context):
     """整链起来后把定位摆到 spawn 位姿（GICP 只吃 0.5 m 内的初值）。"""
     if LaunchConfiguration("set_initial_pose").perform(context) != "true":
         return []
@@ -66,44 +61,26 @@ def _initial_pose(context, *args, **kwargs):
     ]
 
 
-def generate_launch_description():
-    sim_launch = PathJoinSubstitution(
-        [
-            FindPackageShare("diesel_simulation_bringup"),
-            "launch",
-            "simulation.launch.py",
-        ]
+def _assemble(context, share_dir):
+    """按规格拼出定位链的动作列表。"""
+    field = sim_profile.load_field_named(
+        share_dir, LaunchConfiguration("field").perform(context)
     )
-    point_lio_params = PathJoinSubstitution(
-        [FindPackageShare("diesel_simulation_bringup"), "config", "point_lio_sim.yaml"]
+    robot = sim_profile.load_robot_named(
+        share_dir, LaunchConfiguration("robot").perform(context)
     )
-    map_manifest = PathJoinSubstitution(
-        [
-            FindPackageShare("diesel_simulation_bringup"),
-            "map",
-            "rmul_2027",
-            "manifest.yaml",
-        ]
-    )
-    sentry_params = PathJoinSubstitution(
-        [FindPackageShare("diesel_localization_bringup"), "config", "sentry.yaml"]
-    )
-    # 兵种配置的顶层键是**相对节点名**（`diesel_localization:` / `diesel_map_server:`）。
-    # 节点一旦进了 /diesel/<robot> 命名空间，这两个键就匹配不上，ROS 2 会把整份参数
-    # 静默丢弃——症状是启动行打印代码默认值（min_source_points=0 / max_unobservable_dofs=6）
-    # 而不是兵种配置的 100/3，配准随之 initialization timeout。
-    # 这里用 RewrittenYaml 把整份 YAML 挂到命名空间下，键变成 /diesel/sentry/<节点>；
-    # root_key 解析为空串时不改写（见 RewrittenYaml.perform 的 `if root_key:`），
-    # 所以实车（无 namespace）行为不变。
-    sentry_params_ns = RewrittenYaml(
-        source_file=sentry_params,
-        param_rewrites={},
-        root_key=LaunchConfiguration("robot_namespace"),
-    )
+    lidar = robot.lidar
+    # 装位保持 profile 里的字符串口径（static_transform_publisher 按字符串吃参数）
+    lidar_pose = [str(value) for value in lidar.pose]
+    robot_namespace = LaunchConfiguration("robot_namespace")
 
     sim_include = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(sim_launch),
+        PythonLaunchDescriptionSource(
+            os.path.join(share_dir, "launch", "simulation.launch.py")
+        ),
         launch_arguments={
+            "field": LaunchConfiguration("field"),
+            "robot": LaunchConfiguration("robot"),
             "headless": LaunchConfiguration("headless"),
             "gui": LaunchConfiguration("gui"),
             "rviz": LaunchConfiguration("rviz"),
@@ -121,21 +98,21 @@ def generate_launch_description():
         name="front_mid360_static_tf",
         arguments=[
             "--frame-id",
-            "base_footprint",
+            robot.base_frame,
             "--child-frame-id",
-            "front_mid360",
+            lidar.frame,
             "--x",
-            LIDAR_POSE[0],
+            lidar_pose[0],
             "--y",
-            LIDAR_POSE[1],
+            lidar_pose[1],
             "--z",
-            LIDAR_POSE[2],
+            lidar_pose[2],
             "--roll",
-            LIDAR_POSE[3],
+            lidar_pose[3],
             "--pitch",
-            LIDAR_POSE[4],
+            lidar_pose[4],
             "--yaw",
-            LIDAR_POSE[5],
+            lidar_pose[5],
         ],
         parameters=[{"use_sim_time": True}],
     )
@@ -153,9 +130,9 @@ def generate_launch_description():
         name="body_static_tf",
         arguments=[
             "--frame-id",
-            "base_footprint",
+            robot.base_frame,
             "--child-frame-id",
-            "body",
+            robot.body_frame,
             "--x",
             "0.0",
             "--y",
@@ -175,6 +152,9 @@ def generate_launch_description():
         condition=IfCondition(LaunchConfiguration("body_tf")),
     )
 
+    # 环号重排参数必须与传感器视场一致：samples=线数、ang_res_y=垂直视场/(线数-1)、
+    # ang_bottom 是下沿角度的绝对值（上游 point_cloud_converter.cpp:66 的换算，
+    # 传负号会让正常回波全被丢掉，D11）。
     cloud_tool = Node(
         package="ign_sim_pointcloud_tool",
         executable="ign_sim_pointcloud_tool_node",
@@ -183,10 +163,10 @@ def generate_launch_description():
         parameters=[
             {
                 "pcd_topic": "/livox/lidar",
-                "n_scan": 32,
-                "horizon_scan": 1875,
-                "ang_bottom": float(ANG_BOTTOM),
-                "ang_res_y": float(ANG_RES_Y),
+                "n_scan": lidar.channels,
+                "horizon_scan": lidar.horizontal_samples,
+                "ang_bottom": lidar.ang_bottom,
+                "ang_res_y": lidar.ang_res_y,
             }
         ],
     )
@@ -203,16 +183,36 @@ def generate_launch_description():
                 executable="pointlio_mapping",
                 name="point_lio",
                 output="screen",
-                parameters=[point_lio_params],
+                parameters=[
+                    os.path.join(share_dir, "config", "point_lio_sim.yaml"),
+                ],
             )
         ],
+    )
+
+    sentry_params = os.path.join(
+        get_package_share_directory("diesel_localization_bringup"),
+        "config",
+        "sentry.yaml",
+    )
+    # 兵种配置的顶层键是**相对节点名**（`diesel_localization:` / `diesel_map_server:`）。
+    # 节点一旦进了 /diesel/<robot> 命名空间，这两个键就匹配不上，ROS 2 会把整份参数
+    # 静默丢弃——症状是启动行打印代码默认值（min_source_points=0 / max_unobservable_dofs=6）
+    # 而不是兵种配置的 100/3，配准随之 initialization timeout。
+    # 这里用 RewrittenYaml 把整份 YAML 挂到命名空间下，键变成 /diesel/sentry/<节点>；
+    # root_key 解析为空串时不改写（见 RewrittenYaml.perform 的 `if root_key:`），
+    # 所以实车（无 namespace）行为不变。
+    sentry_params_ns = RewrittenYaml(
+        source_file=sentry_params,
+        param_rewrites={},
+        root_key=robot_namespace,
     )
 
     localization_params = [
         sentry_params_ns,
         {
             "use_sim_time": True,
-            "map_manifest": map_manifest,
+            "map_manifest": os.path.join(field.localization_dir, "manifest.yaml"),
             "verify_map_hashes": True,
             # 仿真里点云没有逐点时间戳，定位直接用原始桥出点云；里程计来自 point_lio
             "cloud_topic": "/livox/lidar",
@@ -221,7 +221,7 @@ def generate_launch_description():
             # 30° 视场准备。这里显式改成 360°：留 30° 会让 60000 点先被裁到 ~5000 点、
             # 再过 0.10 m 体素塌到 64~70 点，GICP 直接报「无有效对应」（审计 L7）。
             # 这是「仿真口径」而不是算法参数，所以写在 launch 而不改兵种配置（D59）。
-            "fov_horizontal_deg": 360.0,
+            "fov_horizontal_deg": lidar.horizontal_fov_deg,
             # 诊断开关（decision.md D25）：开启后每窗口打一行耗时与一行点数漏斗。
             # 提成 launch 参数是为了不必改 yaml 就能在仿真里拿到漏斗数据——L7 的
             # source=64~70 只能靠它看出来，且它不影响任何输出。
@@ -246,7 +246,7 @@ def generate_launch_description():
         package="diesel_localization_ros",
         executable="map_server_node",
         name="diesel_map_server",
-        namespace=LaunchConfiguration("robot_namespace"),
+        namespace=robot_namespace,
         output="screen",
         parameters=localization_params,
         condition=IfCondition(LaunchConfiguration("start_map_server")),
@@ -256,13 +256,38 @@ def generate_launch_description():
         package="diesel_localization_ros",
         executable="localization_node",
         name="diesel_localization",
-        namespace=LaunchConfiguration("robot_namespace"),
+        namespace=robot_namespace,
         output="screen",
         parameters=localization_params,
     )
 
+    return [
+        sim_include,
+        lidar_tf,
+        body_tf,
+        cloud_tool,
+        point_lio,
+        map_server,
+        localization,
+        OpaqueFunction(function=_initial_pose),
+    ]
+
+
+def generate_launch_description():
+    bringup_share = get_package_share_directory("diesel_simulation_bringup")
+
     return LaunchDescription(
         [
+            DeclareLaunchArgument(
+                "field",
+                default_value="",
+                description="config/fields/ 下的场地规格名；留空用目录里唯一的那份",
+            ),
+            DeclareLaunchArgument(
+                "robot",
+                default_value="",
+                description="config/robots/ 下的机器人规格名；留空用目录里唯一的那份",
+            ),
             DeclareLaunchArgument("headless", default_value="false"),
             DeclareLaunchArgument("gui", default_value="false"),
             DeclareLaunchArgument("rviz", default_value="false"),
@@ -292,13 +317,6 @@ def generate_launch_description():
             # 故障注入开关（审计 L1/L2）：关掉即可复现「仿真没有 body 帧」，
             # 用于验证定位侧把缺帧表达成 LOST 而不是无限 INITIALIZING。
             DeclareLaunchArgument("body_tf", default_value="true"),
-            sim_include,
-            lidar_tf,
-            body_tf,
-            cloud_tool,
-            point_lio,
-            map_server,
-            localization,
-            OpaqueFunction(function=_initial_pose),
+            OpaqueFunction(function=_assemble, kwargs={"share_dir": bringup_share}),
         ]
     )

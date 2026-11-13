@@ -102,6 +102,19 @@ diesel_simulation/
     │   │   └── rmul_2027.sdf                  #   唯一交付的世界（Fortress 口径）
     │   └── test/
     │       └── test_field_assets.py           #   资源断言：插件前缀、地图几何、网格可解析
+    ├── diesel_sim_tools/                       # 装配库：引擎调用 / 桥接契约 / profile（D29）
+    │   ├── package.xml                        #   ament_cmake + ament_python_install_package
+    │   ├── CMakeLists.txt                     #   安装 Python 包 + 3 个单测
+    │   ├── diesel_sim_tools/
+    │   │   ├── __init__.py                    #   导出 AssemblyError
+    │   │   ├── errors.py                      #   统一异常：装配输入不合法即启动失败
+    │   │   ├── engine_gz.py                   #   gz 启动参数：资源路径 / 世界 / spawn / 真值
+    │   │   ├── bridge.py                      #   桥接契约：加载、模板渲染、参数与重映射
+    │   │   └── profile.py                     #   场地与机器人规格读取 + 桥接占位符上下文
+    │   └── test/
+    │       ├── test_engine_gz.py              #   世界/spawn 参数与缺失世界报错
+    │       ├── test_bridge.py                 #   占位符缺失/残留、方向符号、契约字段校验
+    │       └── test_profile.py                #   路径解析、视场一致性、ang_bottom 口径
     └── diesel_simulation_bringup/              # 启动层：把仿真器接到本仓算法上
         ├── package.xml                        #   ament_cmake，exec_depend 上游与自研包
         ├── CMakeLists.txt                     #   安装 launch/config/rviz/models/map + scripts
@@ -110,7 +123,11 @@ diesel_simulation/
         │   ├── localization_sim.launch.py     #   点云转换 + point_lio + 定位服务
         │   └── navigation_sim.launch.py       #   定位 + odom→base 补全 + Nav2（A3/A6）
         ├── config/
-        │   ├── bridge.yaml                    #   ros_gz_bridge 话题映射
+        │   ├── bridge.yaml                    #   桥接契约：gz 话题模板 + ROS 话题 + expect
+        │   ├── fields/
+        │   │   └── rmul_2027.yaml             #   场地规格：世界 / 地图 / nav2 参数 / A3 目标点
+        │   ├── robots/
+        │   │   └── sentry.yaml                #   机器人规格：SDF / 帧名 / 雷达装位与视场
         │   ├── gui.config                     #   gz GUI 布局（3D 视图 + 调车四面板）
         │   ├── point_lio_sim.yaml             #   point_lio 仿真参数（上游默认值）
         │   └── nav2_params_sim.yaml           #   Nav2 仿真参数（按 0.8 m 通道重标）
