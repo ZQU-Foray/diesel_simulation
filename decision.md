@@ -627,3 +627,66 @@ Consequences：新增 A8（装配可配置）与 A9（桥接契约自检）两�
 
 回退：库包与 YAML 读取是按提交切的等价替换，逐提交 `git revert` 即可；单条桥接件改回
 字面量话题只会让 A9 断言失败，不影响运行。
+
+## D30 下位机链路在仿真里用「固件源码 + 虚拟 CDC」，不用 QEMU/Renode
+
+Context：`/cmd_vel` 目前由 `config/bridge.yaml` 的 `id: cmd_vel` 直接桥进 gz
+（`/model/{robot}/cmd_vel`），协议层被完全绕过——仿真验不到「上位机发一帧、下位机收一帧」
+这段最容易出错的接口。真车侧的栈是 RoboLink v0.2 over USB CDC：PC 侧在
+`diesel_platform::link`（`usb_cdc_port.hpp` / `robolink_frame_parser.hpp` /
+`robolink_host_link.hpp`，500 ms 判活），契约在 `diesel_interfaces`（X2），固件侧在
+`foray_mcu`（`src/hal/usb_cdc.hpp`、`src/middleware/robolink/session.hpp`、`app/pc_link`）。
+其中 PC 侧只有离线单测（192/192），固件侧收到快照只记账不执行，两边都没实机对账。
+
+Decision：
+
+1. **固件侧新增 host 后端，跑真源码**。`foray_mcu` 的 `platform/host_sim/` 实现
+   `hal::UsbCdc`（PTY 上做非阻塞读写、`MAX_WRITE_LENGTH=512` 照契约），`hal::os` 用
+   `steady_clock`，can/uart/spi/gpio/pwm 复用既有 `platform/mock/`。跑道是**同一份**
+   `hal::UsbCdc` + `robolink::Session` + `app/pc_link`，所以切帧、CRC、握手、判活都是真代码。
+2. **虚拟 USB CDC 用 PTY 对，不用 usbip / tty0tty / 内核 gadget**。`virtual_cdc.py` 建一对
+   PTY，两端 `raw`、`VMIN=0 VTIME=0`，`select` 双向中继，符号链接给两个稳定路径。
+   usbip 需要内核模块与真实设备、tty0tty 要编内核模块，都超出「本地可复现」的成本线；
+   PTY 没有设备权限和加载模块的前置。
+3. **不做 QEMU/Renode 全系统仿真**。QEMU 没有 STM32H7 整机模型更没有 USB OTG device 模型；
+   Renode 有 `stm32h7.repl`，但 STM32 的 USB CDC 至今未支持（renode#722、#533 均 open）——
+   真固件能在里面跑，`hal::UsbCdc` 却没有外设，链路永远连不上。等这两个上游补上再评估。
+4. **底盘执行暂由仿真侧过渡桥顶替**。固件 `app/` 下没有 chassis 能力，若坚持「只走真固件」，
+   A10 就只能验到「快照被收下」，验不到车动。因此 `diesel_sim_mcu` 扮演上位机侧（`RoboLinkHostLink`），
+   把 `chassis_vx/vy/wz` 转成 gz 车体速度；电控组补上 chassis + CAN 电机后，这一层退化为
+   「CAN 电机替身」，**协议侧不再有替身**。
+5. **只覆盖底盘平面速度**。云台/发射机构一律不驱动——协议未冻结，PC 侧文档原文即
+   「不得据此驱动云台或发射机构」。
+
+Reason：这条链路的验证价值在「接口」而非「物理」，而接口的真伪取决于**跑的是不是同一份
+编解码与状态机**。host 后端让真源码进链路，成本是一个后端文件加一个 profile；QEMU/Renode
+的成本是等上游补齐 USB CDC，且即使补齐也只能验固件内部逻辑，验不到 PC 侧与固件的字节对账
+（那本来要在实机上做）。
+
+Consequences：新增 A10（下位机链路可用）与 A11（链路自检），见 README §1；
+`mcu_link:=true` 时 launch 把桥接契约的 `id: cmd_vel` 剔除，gz 侧只剩过渡桥一个写入者
+（ROS 侧 Nav2 仍会发该话题，故量底盘速度要 `start_nav2:=false`）；
+PTY 无法检测对端是否打开，host 后端以「端口打开即 connected」近似，实机的连接语义留到上机验。
+跨仓改动（`foray_mcu`）owner 是电控组，落地前需协调；不可动时的替代是仓内验证夹具 + PR 草案。
+
+实现与验证（2026-11-13）：
+
+- 固件侧：`foray_mcu` 的 `platform/host_sim/`（`host_os.cpp` / `host_usb_cdc.cpp`）+ `app/host_sim/main.cpp`
+  + `test/host_sim/host_sim_link.cpp`，commit `d2315f8`（分支 `feat/host-sim`，未推送——跨电控组仓）。
+  `host_sim_link` 14 项断言通过；宿主测试 91/91。
+- 仿真侧：`src/diesel_sim_mcu/`（`sim_mcu_bridge.cpp`，上位机侧 `RoboLinkHostLink`）+ I27 的 `mcu_link`
+  四参数（`sim_up.sh` → navigation → localization → simulation 逐层转发）+ I29 的 `accept.py link`。
+- **闸门判据两次被实测否掉**：`control_msg_age_ms <= 500` 恒不成立（固件该字段停在 `0xFFFF`，见上文）；
+  `last_rx_control_seq >= 已排队条数` 因回读滞后一拍而永不成立。最终只认固件自报的
+  `link_state == ACTIVE` 且 `last_rx_control_seq > 0`。
+- 整链回执（`ROS_DOMAIN_ID=174`、`GZ_PARTITION=m174`）：`ready=PASS ready_delay_s=0.94 bridge_missing=none`、
+  `a2 max_xy_err=0.033 verdict=PASS`、`link status_hz=50.0 frame_errors=0 verdict=PASS`；
+  停固件后 `drop_detect_ms=520`（门限 500 + 40 量化）。
+- P2 回执（`ROS_DOMAIN_ID=176`、`GZ_PARTITION=n176`、`start_nav2:=false`、起点 (2.954, 5.201) `yaw=1.50`）：
+  `+0.5 m/s` 实测 **0.498 m/s**（位移方向与航向单位向量一致）；`-0.5` 实测 0.499；`angular.z=0.5` 实测 0.498 rad/s。
+  测量必须用 `/clock` 仿真时间——wall-clock 会把启动加速段算进去。
+- 顺带记录两条现场约束：多个 `virtual_cdc` 并存时 `/tmp/diesel_host` 指向最后创建的那一对（PTY 符号链接是
+  全局单例），每轮测试前必须清场；Nav2 空闲时 `behavior_server` 也发零速，量底盘速度必须 `start_nav2:=false`。
+
+回退：`mcu_link` 默认 `false`，链路整段不装配，回归到 D29 的直连桥；固件侧 `platform/host_sim/`
+与 `config/profiles/sim_dm_mc02/` 是纯新增，删除不影响 ARM 构建与既有 profile。

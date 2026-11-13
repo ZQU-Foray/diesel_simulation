@@ -1,0 +1,24 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+    <name>diesel_sim_mcu</name>
+    <version>0.1.0</version>
+    <description>
+        仿真侧的下位机过渡桥：把 ROS 侧的底盘速度编成 RoboLink v0.2 控制快照，经
+        虚拟 USB CDC 交给 foray_mcu 的 host_sim 固件；固件确认收到后，桥才把这段速度
+        写进 Gazebo 车体。固件目前没有 chassis 能力，所以底盘执行由本桥顶替
+        （README §3.2、decision.md D30）。
+    </description>
+    <maintainer email="ryanz@example.com">RyanZ</maintainer>
+    <license>Apache-2.0</license>
+
+    <buildtool_depend>ament_cmake</buildtool_depend>
+
+    <depend>diesel_platform_core</depend>
+    <depend>geometry_msgs</depend>
+    <depend>rclcpp</depend>
+
+    <export>
+        <build_type>ament_cmake</build_type>
+    </export>
+</package>

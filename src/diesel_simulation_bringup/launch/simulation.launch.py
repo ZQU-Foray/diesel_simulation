@@ -14,6 +14,10 @@ navigation_sim.launch.py 里，这样单独调点云时不必拖起整链。
     ros2 launch diesel_simulation_bringup simulation.launch.py
     ros2 launch diesel_simulation_bringup simulation.launch.py gui:=true rviz:=true
     ros2 launch diesel_simulation_bringup simulation.launch.py headless:=true
+
+`mcu_link:=true` 时额外起虚拟 USB CDC（`virtual_cdc.py`），把「上位机 ↔ 下位机」
+这段链路接进仿真（README §3.2、decision.md D30）。下位机固件不在这里起：它属于
+`foray_mcu` 仓，用 `mcu_firmware:=<firmware_sim 的绝对路径>` 才代起。
 """
 
 import os
@@ -23,6 +27,7 @@ from launch import LaunchDescription
 from launch.actions import (
     AppendEnvironmentVariable,
     DeclareLaunchArgument,
+    ExecuteProcess,
     IncludeLaunchDescription,
     OpaqueFunction,
     SetEnvironmentVariable,
@@ -36,15 +41,42 @@ from diesel_sim_tools import engine_gz
 from diesel_sim_tools import profile as sim_profile
 
 
-def gz_bridge_arguments(share_dir, context_values):
+def gz_bridge_arguments(share_dir, context_values, skip_ids=()):
     """从 config/bridge.yaml 生成 parameter_bridge 的参数与重映射。
 
     解析与渲染都在 `diesel_sim_tools.bridge`：契约里的 gz 话题是模板，用场地与机器人
     规格的占位符展开；渲染后残留占位符会抛错并指出条目 `id`，而不是生成一条
     「桥建起来了但数据全断」的参数（D20）。
+
+    `skip_ids` 用来让出某条契约：`mcu_link:=true` 时 `cmd_vel` 归过渡桥独占
+    （README §3.2 的独占约束），如果还留着这条例，两个发布者会同时写
+    gz 的 `/model/<robot>/cmd_vel`，指令来源就说不清了。
     """
     entries = bridge_contract.load(bridge_contract.default_path(share_dir))
+    if skip_ids:
+        entries = [entry for entry in entries if entry.id not in skip_ids]
     return bridge_contract.render_entries(entries, context_values)
+
+
+def cmd_vel_entry(share_dir, context_values):
+    """取 `id: cmd_vel` 这条契约渲染后的 (gz_topic, ros_topic)。
+
+    过渡桥要写的是与桥接契约**同一个** gz 话题、读的是同一个 ROS 话题；把这条契约
+    当成唯一来源，就不必在这里再写一遍 `/model/{robot}/cmd_vel`（D29 的同一套口径）。
+    """
+    entries = bridge_contract.load(bridge_contract.default_path(share_dir))
+    for entry in entries:
+        if entry.id == "cmd_vel":
+            gz_topic = bridge_contract.render(
+                entry.gz_topic, context_values, entry_id=entry.id
+            )
+            ros_topic = bridge_contract.render(
+                entry.ros_topic, context_values, entry_id=entry.id
+            )
+            return gz_topic, ros_topic
+    raise bridge_contract.AssemblyError(
+        "桥接契约里没有 id: cmd_vel，过渡桥无处可写（README §3.2）"
+    )
 
 
 def resolve_rviz_config(share_dir, value):
@@ -66,6 +98,60 @@ def resolve_rviz_config(share_dir, value):
             f"rviz_config 指向的配置不存在：{path}；可用配置：{', '.join(available)}"
         )
     return path
+
+
+def _mcu_link_actions(context, share_dir, context_values):
+    """`mcu_link:=true` 时起虚拟 CDC（以及可选的固件宿主进程）。
+
+    虚拟 CDC 是纯 Python 脚本，装在 `lib/diesel_simulation_bringup/` 下，用
+    `ExecuteProcess` 起而不是 `Node`：它不是 ROS 节点，没有参数、没有话题，
+    只是把两个 PTY 端接起来。两端路径由参数给出，每轮仿真可以换名而不互相干扰。
+    """
+    if LaunchConfiguration("mcu_link").perform(context) != "true":
+        return []
+    script = os.path.join(share_dir, "..", "..", "lib", "diesel_simulation_bringup")
+    script = os.path.normpath(os.path.join(script, "virtual_cdc.py"))
+    actions = [
+        ExecuteProcess(
+            cmd=[
+                script,
+                "--host-link",
+                LaunchConfiguration("mcu_link_host_port"),
+                "--mcu-link",
+                LaunchConfiguration("mcu_link_port"),
+            ],
+            output="screen",
+        )
+    ]
+    gz_topic, ros_topic = cmd_vel_entry(share_dir, context_values)
+    actions.append(
+        Node(
+            package="diesel_sim_mcu",
+            executable="sim_mcu_bridge",
+            parameters=[
+                {
+                    "port": LaunchConfiguration("mcu_link_host_port"),
+                    "cmd_vel_topic": ros_topic,
+                    "gz_topic": gz_topic,
+                }
+            ],
+            output="screen",
+        )
+    )
+    firmware = LaunchConfiguration("mcu_firmware").perform(context)
+    if firmware:
+        # 固件要等虚拟 CDC 把符号链接建出来：固件侧自己会按 100 ms 重试打开，
+        # 所以这里不必延时等待。
+        actions.append(
+            ExecuteProcess(
+                cmd=[firmware],
+                additional_env={
+                    "DIESEL_SIM_USB_CDC": LaunchConfiguration("mcu_link_port")
+                },
+                output="screen",
+            )
+        )
+    return actions
 
 
 def _rviz_node(context, share_dir):
@@ -154,8 +240,12 @@ def _assemble(context, share_dir):
         )
     )
 
+    mcu_link = LaunchConfiguration("mcu_link").perform(context) == "true"
     arguments, remappings = gz_bridge_arguments(
-        share_dir, sim_profile.assembly_context(field, robot)
+        share_dir,
+        sim_profile.assembly_context(field, robot),
+        # mcu_link 时把 cmd_vel 这条桥让给过渡桥（README §3.2 独占约束）
+        skip_ids=("cmd_vel",) if mcu_link else (),
     )
     actions.append(
         Node(
@@ -177,6 +267,15 @@ def _assemble(context, share_dir):
         )
     )
     actions.append(OpaqueFunction(function=_rviz_node, kwargs={"share_dir": share_dir}))
+    actions.append(
+        OpaqueFunction(
+            function=_mcu_link_actions,
+            kwargs={
+                "share_dir": share_dir,
+                "context_values": sim_profile.assembly_context(field, robot),
+            },
+        )
+    )
     return actions
 
 
@@ -223,6 +322,32 @@ def generate_launch_description():
             ),
             DeclareLaunchArgument(
                 "yaw", default_value="0.0", description="初始朝向（rad）"
+            ),
+            DeclareLaunchArgument(
+                "mcu_link",
+                default_value="false",
+                description=(
+                    "true 时把 /cmd_vel 走虚拟 USB CDC 交给下位机固件（README §3.2、D30）；"
+                    "默认 false，行为与既有验收路径一致"
+                ),
+            ),
+            DeclareLaunchArgument(
+                "mcu_link_host_port",
+                default_value="/tmp/diesel_host",
+                description="虚拟 CDC 的上位机端（过渡桥打开它）",
+            ),
+            DeclareLaunchArgument(
+                "mcu_link_port",
+                default_value="/tmp/diesel_mcu",
+                description="虚拟 CDC 的下位机端（固件 host_sim 打开它）",
+            ),
+            DeclareLaunchArgument(
+                "mcu_firmware",
+                default_value="",
+                description=(
+                    "foray_mcu 的 firmware_sim 绝对路径；留空表示固件由使用者另起"
+                    "（跨仓，不在本包 install）"
+                ),
             ),
             # 只跑无界面渲染时才需要软件 GL；有 GPU 时设 LIBGL_ALWAYS_SOFTWARE=0
             SetEnvironmentVariable(

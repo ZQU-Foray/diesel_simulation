@@ -21,6 +21,8 @@ ZQU-Foray 的 RMUL 2027 3v3 **场地仿真仓**：在 Gazebo 里搭出赛季场�
 | A7 | 致谢完整 | 三方来源的归属链写进 `THIRD_PARTY_NOTICES.md` |
 | A8 | 装配可配置 | 场地、机器人、桥接三份规格（`config/fields/<field>.yaml`、`config/robots/<robot>.yaml`、`config/bridge.yaml`）是装配的唯一输入：三条 launch 不直接书写场次名 / 机器人名 / gz 话题字面量；桥接规格里的占位符（`{world}` / `{robot}`）在启动前必须全部替换，残留即启动失败并指出条目 `id` |
 | A9 | 桥接契约自检 | `accept.py ready` 对 `bridge.yaml` 每条 `expect` 断言对应 ROS 话题按方向存在发布者 / 订阅者；缺失时按条目 `id` 报错并非零退出（D20 类静默错接必须在这里被拦下） |
+| A10 | 下位机链路可用 | `mcu_link:=true` 时 `/cmd_vel` 经虚拟 USB CDC 交给**下位机固件源码**（`foray_mcu` 的 `host_sim` 后端），上位机 `RoboLinkHostLink` 状态稳定为 `Active`，固件侧 `robolink::Session` 进 `Ready/Active`；停掉任一端后 **≤500 ms** 双方判活失败，`/cmd_vel` 归零。链路只覆盖底盘平面速度，云台/发射机构不驱动（协议未冻结，见 D30） |
+| A11 | 链路自检 | `accept.py link` 打印 `link_state` / `hello_rtt_ms` / `status_hz` / `frame_errors` / `drop_detect_ms`，并在「握手未完成、状态帧断流（持续超过 500 ms）、失联未在 500 ms 内触发」时非零退出；加 `--expect-drop` 时额外要求「链路确实断过，且从最后一帧到判定断开 ≤ 540 ms」——由人停一端触发，停不下来就是 FAIL，不把「一直没断」当成「失联检测正常」 |
 
 进度与阶段划分见 `plan.md`；关键取舍见 `decision.md`。
 
@@ -50,12 +52,13 @@ diesel_simulation/
 │   │   ├── previews/                 # 场地预览图
 │   │   └── tools/                    # 上游审计/生成脚本（只读参考）
 │   ├── diesel_sim_tools/              # 装配库（纯 Python：引擎适配 / 桥接渲染 / profile）
+│   ├── diesel_sim_mcu/                # 过渡桥（RoboLink 从机侧 ↔ gz 车体速度，D30）
 │   └── diesel_simulation_bringup/     # 装配层（launch / profile / 桥接契约 / 地图 / 脚本）
 │       ├── map/rmul_2027/            # PCD + PGM + manifest.yaml（定位侧输入）
 │       ├── map/nav2/                 # 派生导航栅格（只清隧道顶投影，见 D16）
 │       ├── launch/                   # simulation / localization_sim / navigation_sim
 │       ├── config/                   # bridge.yaml + fields/（场地）+ robots/（机器人）+ 调参
-│       ├── scripts/                  # make_pcd / make_manifest / make_nav_map / sim_up / accept
+│       ├── scripts/                  # make_pcd / make_manifest / make_nav_map / sim_up / accept / virtual_cdc
 │       └── test/                     # A4 / A5 / 导航栅格回归
 ├── README.md  AGENTS.md  tree.md  plan.md  decision.md
 └── THIRD_PARTY_NOTICES.md
@@ -74,6 +77,30 @@ diesel_simulation/
 - **占位符**：gz 话题里用 `{world}` / `{robot}` 引用 profile 的值。启动前渲染，**残留未替换的占位符即启动失败**并指出条目 `id`——这类话题写错不会报错、只会静默断流（D20），必须靠前置校验拦住。
 - **扩展一路桥接件**：在 `bridge.yaml` 加一条声明、在 `model.sdf` 加对应传感器片段、必要时在 robot profile 里登记装位，不改 Python 代码。
 - **边界**：本轮只做单引擎（Fortress）的声明式装配；多引擎插件化、资产热切换都不做，见 `decision.md` D29。
+
+### 3.2 虚拟下位机链路（可选装配）
+
+默认可跑通不需要它；`mcu_link:=true` 时 `/cmd_vel` 不再直接桥进 gz，而是走真车同构的下行链路：
+
+```
+上位机（Nav2 / 遥控）──► /diesel/<robot>/cmd_vel
+      └─ diesel_sim_mcu（过渡桥，上位机侧 RoboLinkHostLink）
+            └─ 虚拟 USB CDC：/tmp/diesel_host ═PTY 对═ /tmp/diesel_mcu
+                  └─ 下位机固件 host_sim（foray_mcu 源码）─ hal::UsbCdc ─ robolink::Session
+                        └─ 回读系统状态（link_state / last_rx_control_seq）
+      └─ 固件确认收到控制快照后，桥才把 chassis_vx / vy / wz 写进 gz 车体
+```
+
+- **虚拟 CDC**：`virtual_cdc.py` 用一对 PTY 顶替 USB CDC，两端各自 `raw` 无缓冲，双向字节中继，退出时清理符号链接；`socat` 可作旁证手段但不是依赖。
+- **固件是真的**：链路里跑的是 `foray_mcu` 的同一份源码（`hal::UsbCdc` / `robolink` / `app/pc_link`），只是外设后端换成 PC 的 PTY。QEMU 与 Renode 都不行——两者都没有 STM32 的 USB CDC 模型（`decision.md` D30）。
+- **过渡桥的定位**：固件目前**没有 chassis 能力**（收到快照只记账），所以底盘执行由 `diesel_sim_mcu` 顶替；等电控组补上 chassis 与 CAN 电机后，这一层退化成「CAN 电机替身」，协议侧不再是替身。
+- **固件在环才算数**：桥在 `RoboLinkHostLink` 处于 `Active`、且固件回报 `link_state=ACTIVE` 与
+  `last_rx_control_seq > 0` 之后，才把这段速度写进 gz；判据只取固件自己报的字段——
+  固件 `control_msg_age_ms` 第一版恒为 `0xFFFF`（`app/pc_link` 不再更新它），不能拿来当「收到了」。
+- **独占约束**：`mcu_link:=true` 时 launch 把 `config/bridge.yaml` 的 `id: cmd_vel` 从桥接参数里
+  剔除（`skip_ids=("cmd_vel",)`），gz 侧只有过渡桥一个写入者；ROS 侧 `/diesel/<robot>/cmd_vel`
+  仍可能被写，所以**量底盘速度要用 `start_nav2:=false`**——Nav2 空闲时 `behavior_server` 也在发零速，
+  与本仓的测试指令互相覆盖（实测 `ros2 topic info -v` 数到 6 个发布者）。
 
 ## 4. 数据链
 
@@ -94,7 +121,14 @@ gz-sim 场地世界 (rmul_2027.sdf)
                                         map→odom TF
                                             │
                                         Nav2 规划/控制 ──► /cmd_vel
+                                                             │
+                     mcu_link:=false ─────────────────────────┤（直连：桥接契约 id: cmd_vel）
+                     mcu_link:=true  ──► diesel_sim_mcu ─虚拟 USB CDC─► 固件 host_sim（A10）
+                                                             ▼
+                                              gz /model/<robot>/cmd_vel ─► 车体
 ```
+
+下行有两档：默认档把 `/cmd_vel` 直接桥进 gz，用来跑验收；`mcu_link:=true` 时接上虚拟下位机链路（§3.2），用来验证「上位机 ↔ 下位机」这段接口在仿真里也是真的。
 
 先验地图与栅格**同源**：两者都从场地网格派生，因此定位与 Nav2 不会各说各话。
 不过两者的**判据不同**：定位吃官方 PGM 的稠密占据面，Nav2 需要底盘可通行栅格，
