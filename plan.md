@@ -55,26 +55,43 @@
 - [x] I23 `accept.py` 读 profile 的验收目标点与隧道窗口；`ready` 增加 A9 桥接契约自检。
 - [x] I24 收尾：`tree.md` / `README` / 门禁全绿（`check_style`、`check_tree_doc`、`check_layer`、`selftest`、ctest）。
 
-回执（2026-11-12，分支 `feat/sim-assembly-decoupling`，宿主直跑）：
+回执 A（2026-11-12，改写当期，分支基线 `2639d93`，宿主直跑）：
 
-- 静态门禁：`check_style.py` 文件卫生通过；`check_tree_doc.py` 119 文件 / 36 目录双向一致；
-  `check_layer.py` 依赖方向通过（layer=META）；`selftest.py` 5 条注入全被拦下；
-  `ruff check src` All checks passed；`black --check src` 31 files unchanged。
+- 静态门禁：`check_style.py` 文件卫生通过；`check_tree_doc.py` 双向一致；`check_layer.py`
+  依赖方向通过（layer=META）；`selftest.py` 5 条注入全被拦下；
+  `ruff check src` All checks passed；`black --check src` unchanged。
 - 单元/资产测试：`colcon test --packages-select diesel_sim_tools` 3/3；
   `diesel_simulation_bringup` 7/7（manifest / pcd_align IoU=0.9331 / nav_map / tune_* / tf）。
 - 起链（`navigation_sim.launch.py headless:=true`，ROS_DOMAIN_ID=149 / GZ_PARTITION=i24c）：
-  RTF `0.9996`、`/livox/lidar` 9.104 Hz、`/livox/lidar` height=32 width=1875、
-  `bridge_missing=none`（A9 自检通过）、`[Err]` 0 条。
-- `ready=FAIL ready_delay_s=timeout lidar_s=4.64 localization_s=1.13 bt_navigator=inactive
-  controller_server=None last_state=OK state_reason="warmup complete"`——**与 S0 基线同一失败点**。
-- `a2 samples=4647 first_ok_delay=0.00 max_xy_err=0.040 max_yaw=0.185 last_state=OK lost=0
-  ground_truth=diesel_sim_robot verdict=PASS`（S0：0.033 / 同一 ground_truth）。
-- `a3` 在 `wait_ready` 处异常退出（尾部 `RCLError: failed to shutdown: rcl_shutdown already
-  called ... rcl/init.c:241`），与 S0 基线同一签名。
+  RTF `0.9996`、`/livox/lidar` 9.104 Hz、height=32 width=1875、`bridge_missing=none`（A9 通过）、
+  `[Err]` 0；`ready=FAIL`（卡 lifecycle，与 S0 同一失败点）；`a2 max_xy_err=0.040 lost=0 PASS`；
+  `a3` 在 `wait_ready` 处异常退出。
 
-等价性判据（D29）：A3 本就 FAIL，因此以「A0–A2 回执 + A3 失败指纹」比对——a2 同一判据通过、
-误差同量级（0.040 对 0.033），ready/a3 卡在同一处、TF 超时 553 条（S0 为 1280 条，同为
-Nav2 未激活的副作用，随宿主负载波动）。数据链、话题名、点云元数据（32×1875）均与改写前一致。
+回执 B（2026-11-13，rebase 到 `dev` `95cb331` 之后复测，`ROS_DOMAIN_ID=155` /
+`GZ_PARTITION=asm2`，宿主 load≈5 / 24 核）：
+
+- 构建与测试：三包 `colcon build --symlink-install` 全通过；`colcon test` **12 tests /
+  0 failures**（bringup 8 个含 PR #10 的 `navigation_sim_tf_remap`、field 1、tools 3）；
+  `python3 -m pytest src/diesel_sim_tools/test -q` → **19 passed**；四道 CI 门禁全绿；
+  `ruff` / `black` 全绿。
+- `/livox/lidar` 9.992–9.996 Hz；`/diesel/sentry/tf` 的中继由 `tf_relay` 提供
+  （日志 `TF 中继已启动：/tf → /diesel/sentry/tf`）；launch 日志 `[Err]` 0、
+  `Invalid frame ID` 仅 4 条（中继起来之前的瞬时窗口）。
+- `ready=PASS ready_delay_s=0.64 lidar_s=0.09 localization_s=0.64 bt_navigator=active
+  controller_server=active last_state=OK state_reason="warmup complete" bridge_missing=none`
+  ——**A9 桥接契约自检在整链上通过，且 PR #10 的 TF 修复与本次装配改写兼容**。
+- `a2 samples=6789 first_ok_delay=0.00 max_xy_err=0.041 max_yaw=0.214 last_state=OK lost=0
+  ground_truth=diesel_sim_robot verdict=PASS`（S0 基线 0.033，同量级）。
+- `a3 result=ABORTED time_s=154.66 path_len_m=69.720 cross_samples=0 trace_samples=763
+  max_xy_err=10.508 ground_truth=diesel_sim_robot verdict=FAIL`：TF 修好后 A3 首次真正
+  跑到导航阶段，失败点回到**运动态定位发散**（误差 10.5 m、`Robot is out of bounds of the
+  costmap!` ×21、`GridBased failed` ×12），与 2026-11 审计结论一致——属 `diesel_localization`
+  / `point_lio` 跨仓问题，不在本仓职责内。
+
+等价性判据（D29）：重写前后以「A0–A2 回执 + A3 失败指纹」比对。A2 判据相同、误差同量级
+（0.041 对 0.033）；数据链、话题名、点云元数据（32×1875）、`/sim/pose_info` 真值帧名均一致；
+`ready` 由 FAIL 变 PASS 是因为 rebase 带入了 PR #10 的 TF 修复，不是本改写引入的行为差异
+（改写后 A9 自检与导航参数命中均可复核）。
 
 已知阻塞（**已解决，留档**）：命名空间化后 Nav2 各节点订阅 `<ns>/tf`、`<ns>/tf_static`，
 而 TF 由 `robot_state_publisher` / `body_static_tf` / `sensor_scan_generation` 发在全局
