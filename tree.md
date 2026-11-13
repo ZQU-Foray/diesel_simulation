@@ -115,6 +115,15 @@ diesel_simulation/
     │       ├── test_engine_gz.py              #   世界/spawn 参数与缺失世界报错
     │       ├── test_bridge.py                 #   占位符缺失/残留、方向符号、契约字段校验
     │       └── test_profile.py                #   路径解析、视场一致性、ang_bottom 口径
+    ├── diesel_sim_mcu/                        # 过渡桥：上位机侧 RoboLink 会话 ↔ gz 车体（D30）
+    │   ├── package.xml                        #   ament_cmake，depend diesel_platform_core
+    │   ├── CMakeLists.txt                     #   找不到 diesel_platform_core 时跳过该包
+    │   ├── launch/
+    │   │   └── mcu_bridge.launch.py           #   单独起桥（port / cmd_vel_topic / gz_topic）
+    │   ├── src/
+    │   │   └── sim_mcu_bridge.cpp             #   发控制快照；固件确认后写 gz，失联归零
+    │   └── test/
+    │       └── test_sim_mcu_bridge.py         #   A10：失联兜底与桥接契约的静态断言
     └── diesel_simulation_bringup/              # 启动层：把仿真器接到本仓算法上
         ├── package.xml                        #   ament_cmake，exec_depend 上游与自研包
         ├── CMakeLists.txt                     #   安装 launch/config/rviz/models/map + scripts
@@ -151,7 +160,7 @@ diesel_simulation/
         │   ├── make_manifest.py               #   地图目录 → manifest.yaml（含 sha256）
         │   ├── set_initial_pose.py            #   摆位 + 调定位 Relocalize
         │   ├── make_nav_map.py                #   官方栅格 → 导航栅格（清隧道顶投影）
-        │   ├── accept.py                      #   A2/A3/A6 运行时验收（ready/a2/a3）
+        │   ├── accept.py                      #   A2/A3/A6/A11 运行时验收（ready/a2/a3/link）
         │   ├── tf_relay.py                    #   D28：全局 TF 中继进 /diesel/<robot>
         │   ├── virtual_cdc.py                 #   A10：一对 PTY 顶替 USB CDC（双向中继）
         │   ├── sim_up.sh                      #   一键起整链（默认含 Nav2；--tune 调车视图）
@@ -166,6 +175,7 @@ diesel_simulation/
             ├── test_tune_configs.py           #   调车视图话题白名单 + gz GUI 插件名
             ├── test_tune_rqt.py               #   调车 rqt 启动器行为（语法 / 缺包 / 透传）
             ├── test_tune_report.py            #   调车快照：频率/失联判定 + --json 契约
+            ├── test_mcu_link_launch.py        #   A10：mcu_link 逐层转发 + 桥接契约独占
             └── test_virtual_cdc.py            #   A10：虚拟 CDC 双向字节原样、退出不留链接
 ```
 
@@ -175,6 +185,7 @@ diesel_simulation/
 |---|---|---|
 | `diesel_rmul_2027_field` | 场地几何、材质、地图基准、场地规格文档 | 不放 launch、不写节点 |
 | `diesel_simulation_bringup` | 世界组装、机器人 spawn、桥接、参数、一键脚本 | 不实现定位/导航算法（那是 `diesel_localization` / `diesel_navigation`） |
+| `diesel_sim_mcu` | 过渡桥：上位机侧 RoboLink 会话 ↔ gz 车体速度（D30） | 不实现协议编解码（用 `diesel_platform::link`）；不驱动云台/发射机构 |
 | `map/rmul_2027` | 定位侧先验（点云 + 栅格 + 清单） | 不做运行时修改；重新生成靠脚本 |
 | `map/nav2` | 导航侧栅格（官方图的派生副本 + 差异断言） | 不改官方图；差异必须落在隧道开放段内 |
 | `tools/`（field 包内） | 上游资产生成与审计脚本，供追溯 | 不被安装、不被运行时依赖 |

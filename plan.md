@@ -116,18 +116,43 @@ Invalid frame ID "odom"`，costmap 永不激活 ⇒ `ready` 卡在 lifecycle。
 `host_sim` 后端），跑通 HELLO 握手、心跳、状态帧回读与 500 ms 判活，底盘速度再由过渡桥
 送回 gz。默认 `false`，不影响既有验收路径。
 
-- [ ] I25 `virtual_cdc.py`：PTY 对 + 双向中继 + 退出清理，`--echo-log` 与字节计数。
-- [ ] I26 `foray_mcu` 的 `platform/host_sim/`（`hal::UsbCdc` 落到 PTY、`hal::os` 用
-      `steady_clock`、其余外设复用 `platform/mock/`）+ `config/profiles/sim_dm_mc02/`
-      + `firmware_sim_dm_mc02` 目标（`host-tests` 预设内）。
-- [ ] I27 `simulation.launch.py` 的 `mcu_link` / `mcu_link_port` 参数与 `virtual_cdc` 装配。
-- [ ] I28 `diesel_sim_mcu` 过渡桥：从机侧会话 → `/diesel/<robot>/cmd_vel`；
-      `/sim/pose_info` → `GIMBAL_ATTITUDE` / `SYSTEM_STATUS` 回写；>500 ms 无帧归零。
-- [ ] I29 `accept.py link` 子命令：`link_state` / `hello_rtt_ms` / `status_hz` / `frame_errors`，
-      握手未完成或失联未在 500 ms 内触发即非零退出。
-- [ ] I30 收尾：`tree.md` / README / 门禁全绿；整链回执（ready、a2、link、失联归零）。
+- [x] I25 `virtual_cdc.py`：PTY 对 + 双向中继 + 退出清理，`--echo-log` 与字节计数。
+      `commit 6e13363`。
+- [x] I26 `foray_mcu` 的宿主后端：`platform/host_sim/`（`hal::UsbCdc` 落到 PTY、`hal::os` 用
+      `steady_clock`）+ 组合点 `app/host_sim/main.cpp` + 宿主可执行 `firmware_sim`（根 `CMakeLists.txt`
+      的 `HOST_SIM` 选项切 `platform/mock` / `platform/host_sim`）+ `test/host_sim/host_sim_link.cpp`。
+      `commit d2315f8`（分支 `feat/host-sim`，**未推送**——跨电控组仓，须先协调）。
+      与原计划的差异：没有另做 `config/profiles/sim_dm_mc02/`——该链路只用到 `app/pc_link`，
+      不需要 profile 里的装配清单。
+- [x] I27 `simulation.launch.py` 的 `mcu_link` / `mcu_link_host_port` / `mcu_link_port` / `mcu_firmware`
+      参数与 `virtual_cdc` 装配，并从 `sim_up.sh` 经 navigation → localization 逐层转发
+      （`test_mcu_link_launch.py` 断言四层）。`mcu_link:=true` 时桥接契约的 `id: cmd_vel` 被剔除。
+- [x] I28 `diesel_sim_mcu` 过渡桥：上位机侧 `RoboLinkHostLink` → 控制快照；固件回报
+      `link_state=ACTIVE` 且 `last_rx_control_seq > 0` 后才写 gz 车体速度；>500 ms 无状态帧归零。
+      原计划里的 `/sim/pose_info` → `GIMBAL_ATTITUDE` 回写**没有实现**——协议未冻结，D30 第 5 条
+      明确不驱动云台，回写姿态没有消费者。
+- [x] I29 `accept.py link` 子命令：`link_state` / `hello_rtt_ms` / `status_hz` / `frame_errors` /
+      `drop_detect_ms`，握手未完成或失联未在 500 ms 内触发即非零退出；`--expect-drop` 要求人停一端
+      并断言检出延迟 ≤ 540 ms。
+- [x] I30 收尾：`tree.md` / README A11 与 §3.2 / `decision.md` D30 的实现与验证；门禁全绿；
+      整链回执（ready、a2、link、P2 速度、失联归零）。
 
-回执：待补（本小节在代码落地后回填，含每轮 `ROS_DOMAIN_ID` / `GZ_PARTITION` 与原始输出）。
+回执（2026-11-13）：
+
+- 整链（`ROS_DOMAIN_ID=174`、`GZ_PARTITION=IGN_PARTITION=m174`，
+  `mcu_firmware:=/home/ryanz/Projects/foray_mcu/build/host-sim/firmware_sim`、`initial_pose_delay:=12.0`）：
+  `ready=PASS ready_delay_s=0.94 lidar_s=1.06 localization_s=0.94 bt_navigator=active controller_server=active bridge_missing=none`；
+  `a2 samples=9615 max_xy_err=0.033 last_state=OK lost=0 verdict=PASS`；
+  `link link_state=Active hello_rtt_ms=20 status_hz=50.0 frame_errors=0 verdict=PASS`。
+- 失联（`--expect-drop`，停固件进程）：`link link_state=Disconnected drop_detect_ms=520 verdict=PASS`。
+- P2 速度（`ROS_DOMAIN_ID=176`、`GZ_PARTITION=IGN_PARTITION=n176`、`start_nav2:=false`、起点
+  (2.954, 5.201) `yaw=1.50`）：`+0.5 m/s` 实测 **0.498 m/s**（位移方向 (0.07, 1.00) 与航向单位向量
+  一致）、`-0.5 m/s` 实测 0.499、`angular.z=0.5` 实测 0.498 rad/s。速度必须用 `/clock` 仿真时间算，
+  wall-clock 会把启动加速段摊进去。
+- 现场约束（写进 README §3.2）：多个 `virtual_cdc` 并存时 PTY 符号链接是全局单例，
+  `/tmp/diesel_host` 指向最后创建的那一对 ⇒ 每轮测试前必须清场；Nav2 空闲时 `behavior_server`
+  也在发零速，量底盘速度必须 `start_nav2:=false`。
+- 未完成（跨仓）：`foray_mcu` 的 `d2315f8` 还没推送、没开 PR——owner 是电控组，需先协调。
 
 ## M11 联调缺陷整改（2026-11-12，分支 `fix/m11-body-tf`）
 
