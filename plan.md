@@ -22,11 +22,17 @@
       `/odometry`，`bridge.yaml` 的 `ros_topic` 改 `/diesel/sentry/cmd_vel`；
       桥的 `gz_topic` 仍是 `/model/diesel_sim_robot/cmd_vel`。
 - [x] `accept.py` 支持命名空间：生命周期探针与 `NavigateToPose` 走 `<ns>/...`。
-- [x] TF 话题拉回绝对名（D28）：Nav2 节点的 tf2 监听器按相对名订阅，进 namespace 后
+- [x] TF 喂进命名空间（D28）：Nav2 节点的 tf2 监听器按相对名订阅，进 namespace 后
       落到 `/diesel/sentry/tf`（实测 5 订阅 / 0 发布），代价地图永远等不到 `odom`、
-      `bt_navigator` 卡 `inactive`。修法：`PushRosNamespace` 后紧跟
-      `SetRemap(src="tf", dst="/tf")` + `SetRemap(src="tf_static", dst="/tf_static")`；
-      回归用例 `test/test_navigation_sim_tf_remap.py` 注册为 ctest `navigation_sim_tf_remap`。
+      `bt_navigator` 卡 `inactive`。修法：新增 `scripts/tf_relay.py`，把根 `/tf`、
+      `/tf_static` 中继到 `<robot_namespace>/tf(_static)`，随 `PushRosNamespace` 一起
+      放进 Nav2 组（`tf_relay:=false` 可关）；`/tf` 用 best_effort + volatile、
+      `/tf_static` 用 reliable + transient_local，与发布端一致。
+      曾试过 `SetRemap(src="tf", dst="/tf")`，**无效**——`launch` 的 remap 不随
+      `IncludeLaunchDescription` 传播，子进程命令行 `grep -c "tf:=/tf"` = 0（见 D28）。
+      回归用例 `test/test_navigation_sim_tf_remap.py` 注册为 ctest
+      `navigation_sim_tf_remap`，断言同一 `GroupAction` 里既有 `PushRosNamespace`
+      又有 `tf_relay`，且不得残留 `SetRemap`。
 - [x] 起链回执（2026-11-13，宿主直跑 `navigation_sim.launch.py headless:=true`，
       `ROS_DOMAIN_ID=85`）：`ready=PASS ready_delay_s=0.94 lidar_s=0.1 localization_s=0.94
       bt_navigator=active controller_server=active last_state=OK state_reason="warmup complete"`；
