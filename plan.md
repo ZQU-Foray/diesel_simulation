@@ -5,8 +5,10 @@
 
 ## 当前断点（2026-11-16）
 
-分支 `fix/point-lio-sim-timing`（起自 `origin/dev` = `92709bb`）。M15 的代码与文档已落地、
-门禁与整链 A/B 已跑完，**尚未提交推送**。下一步：小步提交 → PR 到 `dev` → 等 CI。
+分支 `fix/point-lio-sim-timing`（起自 `origin/dev` = `92709bb`）。M15 已全部落地：
+四个逻辑提交 `4af3f8e` / `d730661` / `9f8c43e` / `55f76dc` 已推送，
+**PR #15 已开到 `dev`**（<https://github.com/ZQU-Foray/diesel_simulation/pull/15>），等 CI。
+下一步：CI 全绿后由主人决定合并；合并后再看 I31（先验图配准退化，属 `diesel_localization` 仓）。
 本轮**没有**改任何定位/导航参数，也**没有**改上游 vendored 仓（`pb2025_sentry_nav` /
 `point_lio` submodule / `ign_sim_pointcloud_tool`）。
 
@@ -36,8 +38,14 @@
 - [x] `point_lio_sim.yaml` **只改注释**：写清 `timestamp_unit: 2` 为何故意、附 A/B 数字与复现命令；
       顺手更正 `time_diff_lidar_to_imu` 的误导注释（本 fork **读了不用**）。
 - [x] 门禁回执：`check_style` / `check_tree_doc`（131 文件 / 40 目录双向一致）/ `check_layer` /
-      `ruff` / `black` 全绿；`test_lio_eval` PASS。
-- [ ] 提交 + PR 到 `dev` + CI 全绿。
+      `selftest`（5 条注入全拦下）/ `ruff` / `black` 全绿；`colcon test` **16 tests 0 failures**
+      （`tools_lio_eval` 在册）；`test_lio_eval` 宿主单测 6 passed。
+- [x] 整链 A/B 用仓内 `pio` 复跑（不是一次性探针）：`UNIT=2` → `samples=240 unaligned=0`
+      `truth_path_m=5.766 move_max_xy_err=0.0324 move_max_yaw=0.094` **PASS**；
+      `UNIT=0` → `0.1013` / `1.066` **FAIL**。量具能拦住被证伪的"修复"。
+- [x] 四个逻辑提交 + PR #15 到 `dev`（`4af3f8e` / `d730661` / `9f8c43e` / `55f76dc`）；
+      四个提交在临时 worktree 里各自独立通过 `check_tree_doc`。
+- [ ] PR #15 的 CI 全绿 → 由主人决定合并。
 
 ## M12 ROS 运行时 namespace 统一（2026-11-12，分支 `feat/nav2-namespace`）
 
