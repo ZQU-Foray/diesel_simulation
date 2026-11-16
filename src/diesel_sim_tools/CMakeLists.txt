@@ -12,15 +12,15 @@ ament_python_install_package(${PROJECT_NAME})
 
 if(BUILD_TESTING)
     enable_testing()
-    # 三个单测都是「脚本 + main()」风格，与 field/test 一致：不需要 colcon 安装
+    # 单测都是「脚本 + main()」风格，与 field/test 一致：不需要 colcon 安装
     # 产物即可直接跑，CI 与本机行为相同。
-    foreach(unit engine_gz bridge profile)
+    foreach(unit engine_gz bridge profile lio_eval)
         add_test(NAME tools_${unit}
             COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/test/test_${unit}.py
             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
         )
     endforeach()
-    set_tests_properties(tools_engine_gz tools_bridge tools_profile
+    set_tests_properties(tools_engine_gz tools_bridge tools_profile tools_lio_eval
         PROPERTIES TIMEOUT 60)
 
     install(DIRECTORY test DESTINATION share/${PROJECT_NAME})
