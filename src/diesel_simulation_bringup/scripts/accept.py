@@ -15,6 +15,9 @@
 #          落进隧道顶投影（decision.md D16 的判定口径）
 #   link   虚拟下位机链路（README A11）：握手进 Active、固件状态帧持续到达、无帧错误，
 #          需要时再断言「停掉一端后 500 ms 内判活失败」
+#   pio    里程计漂移量具（decision.md D31）：静止 → 直行 → 停止三段，量 point_lio 的
+#          /aft_mapped_to_init 相对真值的**位移**误差。--passive 时不发 cmd_vel，
+#          只旁路观测（配合 a3 跑，用来分清「里程计漂了」还是「先验图配准漂了」）。
 #
 # 真值取 gz 的 /sim/pose_info（world 系 = map 系，官方图 origin 就是 world 坐标）；
 # 取不到真值时如实标 ground_truth=none 并把该项判据判失败，绝不放水（AGENTS.md）。
@@ -27,19 +30,23 @@ import time
 import rclpy
 from ament_index_python.packages import get_package_share_directory
 from diesel_localization_ros.msg import LocalizationState
+from geometry_msgs.msg import Twist
 from lifecycle_msgs.msg import State as LifecycleState
 from lifecycle_msgs.srv import GetState
 from nav2_msgs.action import NavigateToPose
+from nav_msgs.msg import Odometry
 from rclpy.action import ActionClient
 from rclpy.node import Node
 from rclpy.qos import QoSHistoryPolicy, QoSProfile, QoSReliabilityPolicy
 from rclpy.utilities import remove_ros_args
+from rosgraph_msgs.msg import Clock
 from sensor_msgs.msg import PointCloud2
 from std_msgs.msg import String
 from tf2_msgs.msg import TFMessage
 from tf2_ros import Buffer, TransformListener
 
 from diesel_sim_tools import bridge as bridge_contract
+from diesel_sim_tools import lio_eval
 from diesel_sim_tools import profile as sim_profile
 
 # 隧道窗口、A3 目标点与真值帧名来自场地/机器人规格（config/fields、config/robots，D29）。
@@ -55,6 +62,22 @@ A2_MAX_YAW_ERR_DEG = 5.0
 # 轨迹采样率：5 Hz 足以在 0.8 m 宽、1.0 m/s 上限的隧道里取到多个点（穿过 0.35 m 金属顶
 # 投影段约 0.35–0.5 s，至少 2 个采样点）
 TRACE_HZ = 5.0
+
+# pio 的漂移判据（decision.md D31 的实测标定，不是拍脑袋）：
+# 同一条 5.77 m 直行，现状（timestamp_unit: 2，curvature≈0）量到 max_xy_err=0.028 m、
+# max_yaw=0.096°；把单位改成 0（按秒解释、伪造 0.1 s 扫掠）则变成 0.104 m / 1.29°。
+# 门限取在两者之间：0.05 m 给现状约 1.8 倍余量，同时**必须**拦住那个有害的「修复」。
+PIO_MAX_XY_ERR_M = 0.05
+PIO_MAX_YAW_ERR_DEG = 0.5
+
+# 静止段与停止段各 3 s：point_lio 10 Hz，3 s 有 ~30 帧，足够把「起步前的稳态」和
+# 「刹停后的回弹」与运动段分开——混在一起会把刹停过冲算进运动漂移。
+PIO_SETTLE_S = 3.0
+PIO_STOP_S = 3.0
+
+# 20 Hz 发 cmd_vel：gz 的 cmd_vel 订阅端按最新值积分，10 Hz 会让速度呈阶梯，
+# 起步瞬间的加速度尖峰污染 IMU；20 Hz 是上游 mcu 过渡桥的状态帧量级，够用且不刷屏。
+PIO_CMD_HZ = 20.0
 
 # 下位机链路的判据（README A10/A11）
 # 判活门限 500 ms 是 robolink v0.2 的规格值；上位机状态机按 20 ms 循环采样，
@@ -121,7 +144,7 @@ def lifecycle_state_name(node, service_name):
 
 
 class AcceptNode(Node):
-    """一次采集/验收用的节点：只订阅，不发控制指令（a3 只发导航目标）。"""
+    """一次采集/验收用的节点：默认只订阅（a3 发导航目标、pio 发 cmd_vel）。"""
 
     def __init__(self, args, field, robot, endpoints):
         super().__init__("accept")
@@ -139,6 +162,13 @@ class AcceptNode(Node):
         self.last_reason = ""
         self.truth = None
         self.truth_frame = None
+        # 真值轨迹与仿真时钟：pio/a3 要把真值插值到被测消息自己的 stamp（D31）
+        self.truth_track = lio_eval.TruthTrack()
+        self.truth_timebase = None
+        self.sim_clock = None
+        # point_lio 的里程计（camera_init→body，戳取 lidar_end_time）
+        self.odom = None
+        self.odom_frames = 0
         # 下位机链路的状态行（diesel_sim_mcu 每秒/每 100 ms 发一行 key=value 文本）
         self.link_status = None
         self.link_updates = 0
@@ -157,6 +187,11 @@ class AcceptNode(Node):
         self.state_topic = state_topic
         self.create_subscription(LocalizationState, state_topic, self._on_state, 10)
         self.create_subscription(TFMessage, "/sim/pose_info", self._on_pose_info, 10)
+        self.create_subscription(Clock, "/clock", self._on_clock, sensor_qos)
+        # point_lio 发的是**绝对名** aft_mapped_to_init（laserMapping.cpp:390），
+        # 不吃 namespace，所以这里不能拼 self.namespace。
+        self.odom_topic = args.odom_topic
+        self.create_subscription(Odometry, self.odom_topic, self._on_odom, sensor_qos)
         self.link_topic = f"{self.namespace}/mcu_link/status"
         self.create_subscription(String, self.link_topic, self._on_link_status, 10)
 
@@ -165,6 +200,20 @@ class AcceptNode(Node):
 
     def _on_lidar(self, _msg):
         self.lidar_frames += 1
+
+    def _on_clock(self, msg):
+        self.sim_clock = msg.clock.sec + msg.clock.nanosec * 1e-9
+
+    def _on_odom(self, msg):
+        stamp = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
+        pose = msg.pose.pose
+        self.odom = (
+            stamp,
+            pose.position.x,
+            pose.position.y,
+            yaw_of(pose.orientation),
+        )
+        self.odom_frames += 1
 
     def _on_link_status(self, msg):
         """解析过渡桥的状态行：`link_state=Active hello_rtt_ms=20 status_frames=…`。
@@ -204,21 +253,53 @@ class AcceptNode(Node):
         没有就退回模型根位姿，两者都要与实际使用的一致，取到哪个都打印出来。
         """
         candidates = {
-            transform.child_frame_id: transform.transform
+            transform.child_frame_id: transform
             for transform in msg.transforms
             if transform.child_frame_id == f"{self.model_name}/chassis"
             or transform.child_frame_id == self.model_name
             or transform.child_frame_id.startswith(f"{self.model_name}/")
         }
+        chosen = None
         for name in (f"{self.model_name}/chassis", self.model_name):
             if name in candidates:
-                self.truth = candidates[name]
-                self.truth_frame = name
-                return
-        if candidates:
-            name = min(candidates)
-            self.truth = candidates[name]
-            self.truth_frame = name
+                chosen = name
+                break
+        if chosen is None and candidates:
+            chosen = min(candidates)
+        if chosen is None:
+            return
+        stamped = candidates[chosen]
+        self.truth = stamped.transform
+        self.truth_frame = chosen
+        self._push_truth(stamped)
+
+    def _push_truth(self, stamped):
+        """把真值压进轨迹，时间基优先用消息自己的 stamp。
+
+        gz 的 pose/info 经桥接后 header.stamp 常常是 0（D31 实测）。那种情况下
+        只能用收到时的 /clock：否则插值永远取不到样本，量具会「一个样本都没量到」
+        却看起来在正常运行。用了哪个时间基要在回执里说清楚。
+        """
+        header = stamped.header.stamp.sec + stamped.header.stamp.nanosec * 1e-9
+        if header > 0.0:
+            stamp, base = header, "header"
+        elif self.sim_clock is not None:
+            stamp, base = self.sim_clock, "clock"
+        else:
+            return
+        if self.truth_track.push(
+            stamp,
+            stamped.transform.translation.x,
+            stamped.transform.translation.y,
+            yaw_of(stamped.transform.rotation),
+        ):
+            self.truth_timebase = base
+
+    def truth_at(self, stamp):
+        """真值插值到给定 stamp；取不到返回 None（绝不外推、绝不退回最新值）。"""
+        if stamp is None or stamp <= 0.0:
+            return None
+        return self.truth_track.at(stamp)
 
     def spin_for(self, seconds):
         deadline = time.monotonic() + seconds
@@ -357,6 +438,8 @@ def cmd_a2(node, args):
         if message is None or not message.pose_valid:
             continue
         samples += 1
+        # a2 是**静止保持**，速度为 0，处理延迟乘速度仍是 0，所以这里可以直接用
+        # 最新真值；运动场景一律走 pio 的时间对齐口径（D31）。
         truth = node.truth_pose()
         if truth is None:
             continue
@@ -391,6 +474,123 @@ def cmd_a2(node, args):
     )
     detail["verdict"] = "PASS" if ok else "FAIL"
     log_kv("a2 ", **detail)
+    return 0 if ok else 1
+
+
+def cmd_pio(node, args):
+    """pio：point_lio 里程计漂移量具（decision.md D31）。
+
+    静止 → 匀速直行 → 刹停三段，逐帧把真值插值到里程计自己的 stamp 再比**位移**。
+    为什么不复用 a2：a2 是静止保持，量不到运动畸变；a3 依赖 Nav2，规划失败会掩盖
+    里程计本身的表现。要判断「运动补偿到底有没有生效」，必须有一条不依赖 Nav2 的
+    开环运动量具。
+
+    --passive 时不发 cmd_vel，只旁路观测，用来在 a3 跑的同时分清「里程计漂了」
+    还是「先验图配准漂了」。
+    """
+    ready_deadline = time.monotonic() + args.deadline
+    ready = False
+    while time.monotonic() < ready_deadline:
+        rclpy.spin_once(node, timeout_sec=0.05)
+        if node.odom is not None and len(node.truth_track) >= 2:
+            ready = True
+            break
+    if not ready:
+        log_kv(
+            "pio ",
+            result="NOT_READY",
+            odom_frames=node.odom_frames,
+            truth_samples=len(node.truth_track),
+            verdict="FAIL",
+        )
+        return 1
+
+    publisher = None
+    if not args.passive:
+        publisher = node.create_publisher(Twist, f"{node.namespace}/cmd_vel", 10)
+
+    if args.passive:
+        phases = [("observe", args.duration, 0.0, 0.0)]
+    else:
+        phases = [
+            ("settle", args.settle, 0.0, 0.0),
+            ("move", args.duration, args.speed, args.yaw_rate),
+            ("stop", args.stop, 0.0, 0.0),
+        ]
+
+    evaluator = lio_eval.DriftEvaluator()
+    unaligned = 0
+    last_stamp = None
+    try:
+        for name, seconds, speed, yaw_rate in phases:
+            twist = Twist()
+            twist.linear.x = float(speed)
+            twist.angular.z = float(yaw_rate)
+            phase_end = time.monotonic() + seconds
+            next_cmd = 0.0
+            while time.monotonic() < phase_end:
+                rclpy.spin_once(node, timeout_sec=0.01)
+                now = time.monotonic()
+                if publisher is not None and now >= next_cmd:
+                    publisher.publish(twist)
+                    next_cmd = now + 1.0 / PIO_CMD_HZ
+                if node.odom is None or node.odom[0] == last_stamp:
+                    continue
+                last_stamp = node.odom[0]
+                stamp, x, y, yaw = node.odom
+                truth = node.truth_at(stamp)
+                if truth is None:
+                    # 落在真值采样区间之外：如实计数，不拿最新真值顶替（D31）
+                    unaligned += 1
+                    continue
+                latency = node.sim_clock - stamp if node.sim_clock is not None else None
+                evaluator.add(name, stamp, (x, y, yaw), truth, latency=latency)
+    finally:
+        if publisher is not None:
+            # 无论中途出什么事都要把车停住：留一个还在跑的 cmd_vel 会污染下一次验收
+            stop = Twist()
+            for _ in range(int(PIO_CMD_HZ / 2)):
+                publisher.publish(stop)
+                rclpy.spin_once(node, timeout_sec=0.01)
+                time.sleep(1.0 / PIO_CMD_HZ)
+
+    summary = evaluator.summary()
+    move_key = "observe" if args.passive else "move"
+    move = summary["phases"][move_key]
+    detail = {
+        "mode": "passive" if args.passive else "drive",
+        "samples": summary["samples"],
+        "unaligned": unaligned,
+        "odom_frames": node.odom_frames,
+        "truth_path_m": f"{summary['truth_path_m']:.3f}",
+        "truth_timebase": node.truth_timebase or "none",
+        "ground_truth": node.truth_frame or "none",
+    }
+    for phase in ("settle", "move", "stop", "observe"):
+        item = summary["phases"][phase]
+        if item is None:
+            continue
+        detail[f"{phase}_max_xy_err"] = f"{item['max_xy_err']:.4f}"
+        detail[f"{phase}_max_yaw"] = f"{item['max_yaw_err_deg']:.3f}"
+        if "max_latency_s" in item:
+            detail[f"{phase}_max_latency_s"] = f"{item['max_latency_s']:.3f}"
+
+    # 车没真的走起来（撞墙 / 桥没接上）时，误差小是假象，必须判失败而不是报喜。
+    moved_enough = summary["truth_path_m"] >= args.min_path
+    ok = (
+        move is not None
+        and moved_enough
+        and move["max_xy_err"] <= PIO_MAX_XY_ERR_M
+        and move["max_yaw_err_deg"] <= PIO_MAX_YAW_ERR_DEG
+    )
+    if move is None:
+        detail["result"] = "NO_ALIGNED_SAMPLE"
+    elif not moved_enough:
+        detail["result"] = "ROBOT_DID_NOT_MOVE"
+    else:
+        detail["result"] = "MEASURED"
+    detail["verdict"] = "PASS" if ok else "FAIL"
+    log_kv("pio ", **detail)
     return 0 if ok else 1
 
 
@@ -584,6 +784,8 @@ def cmd_a3(node, args):
     trace = []
     max_xy_err = 0.0
     truth_used = 0
+    truth_aligned = 0
+    truth_fallback = 0
     next_sample = time.monotonic()
     while not result_future.done() and time.monotonic() - send_start < args.timeout:
         rclpy.spin_once(node, timeout_sec=0.02)
@@ -594,17 +796,28 @@ def cmd_a3(node, args):
         pose = node.tf_pose()
         if pose is not None:
             trace.append((now - send_start, pose[0], pose[1]))
-        truth = node.truth_pose()
         message = node.state_msg
-        if truth is not None and message is not None and message.pose_valid:
-            truth_used += 1
-            max_xy_err = max(
-                max_xy_err,
-                math.hypot(
-                    message.pose.pose.position.x - truth[0],
-                    message.pose.pose.position.y - truth[1],
-                ),
-            )
+        if message is not None and message.pose_valid:
+            # 真值插值到定位消息自己的 stamp：运动下「最新真值」比它超前一个处理
+            # 延迟，直接相减会把延迟量成米级误差（D31）。取不到才退回最新真值，
+            # 并单独计数——退回值含延迟，不能与对齐样本混为一谈。
+            stamp = message.header.stamp.sec + message.header.stamp.nanosec * 1e-9
+            truth = node.truth_at(stamp)
+            if truth is not None:
+                truth_aligned += 1
+            else:
+                truth = node.truth_pose()
+                if truth is not None:
+                    truth_fallback += 1
+            if truth is not None:
+                truth_used += 1
+                max_xy_err = max(
+                    max_xy_err,
+                    math.hypot(
+                        message.pose.pose.position.x - truth[0],
+                        message.pose.pose.position.y - truth[1],
+                    ),
+                )
 
     timed_out = not result_future.done()
     if timed_out:
@@ -639,6 +852,8 @@ def cmd_a3(node, args):
         "cross_samples": cross_samples,
         "trace_samples": len(trace),
         "max_xy_err": f"{max_xy_err:.3f}" if truth_used else "none",
+        "truth_aligned": truth_aligned,
+        "truth_fallback": truth_fallback,
         "ground_truth": node.truth_frame or "none",
         "verdict": "PASS" if ok else "FAIL",
     }
@@ -666,6 +881,11 @@ def main(argv=None):
         default="",
         help="config/robots/ 下的机器人规格名（真值帧名的模型名来源）；留空用唯一那份",
     )
+    parser.add_argument(
+        "--odom-topic",
+        default="/aft_mapped_to_init",
+        help="被量的里程计话题（point_lio 发绝对名，默认 /aft_mapped_to_init）",
+    )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     ready = subparsers.add_parser("ready", help="等整链就绪")
@@ -684,6 +904,31 @@ def main(argv=None):
     )
     a3.add_argument("--deadline", type=float, default=300.0, help="等就绪的最长秒数")
     a3.add_argument("--timeout", type=float, default=240.0, help="单次导航的最长秒数")
+
+    pio = subparsers.add_parser("pio", help="里程计漂移量具（D31）")
+    pio.add_argument("--deadline", type=float, default=120.0, help="等数据到齐的秒数")
+    # 默认 0.5 m/s × 12 s ≈ 6 m：rmul_2027 在 y≈2.0 有一条 x∈[0.2,7.2] 的干净走廊，
+    # 6 m 走得完；y=4 那条只有 1.35 m 就撞墙，量出来的「小误差」是假象。
+    pio.add_argument("--speed", type=float, default=0.5, help="直行速度 m/s")
+    pio.add_argument("--duration", type=float, default=12.0, help="运动段秒数")
+    pio.add_argument(
+        "--yaw-rate", type=float, default=0.0, help="叠加的偏航角速度 rad/s"
+    )
+    pio.add_argument(
+        "--settle", type=float, default=PIO_SETTLE_S, help="起步前静止秒数"
+    )
+    pio.add_argument("--stop", type=float, default=PIO_STOP_S, help="刹停后静止秒数")
+    pio.add_argument(
+        "--min-path",
+        type=float,
+        default=1.0,
+        help="真值位移下限 m：低于它说明车没走起来（撞墙/桥没接），判 FAIL",
+    )
+    pio.add_argument(
+        "--passive",
+        action="store_true",
+        help="不发 cmd_vel，只旁路观测（配合 a3 跑，分清里程计漂移与配准漂移）",
+    )
 
     link = subparsers.add_parser("link", help="虚拟下位机链路（A11）")
     link.add_argument(
@@ -721,6 +966,8 @@ def main(argv=None):
             return cmd_a2(node, args)
         if args.command == "link":
             return cmd_link(node, args)
+        if args.command == "pio":
+            return cmd_pio(node, args)
         return cmd_a3(node, args)
     finally:
         node.destroy_node()

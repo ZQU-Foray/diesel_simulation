@@ -162,7 +162,7 @@ diesel_simulation/
         │   ├── make_manifest.py               #   地图目录 → manifest.yaml（含 sha256）
         │   ├── set_initial_pose.py            #   摆位 + 调定位 Relocalize
         │   ├── make_nav_map.py                #   官方栅格 → 导航栅格（清隧道顶投影）
-        │   ├── accept.py                      #   A2/A3/A6/A11 运行时验收（ready/a2/a3/link）
+        │   ├── accept.py                      #   A2/A3/A6/A11/A12 运行时验收（ready/a2/a3/link/pio）
         │   ├── tf_relay.py                    #   D28：全局 TF 中继进 /diesel/<robot>
         │   ├── virtual_cdc.py                 #   A10：一对 PTY 顶替 USB CDC（双向中继）
         │   ├── sim_up.sh                      #   一键起整链（默认含 Nav2；--tune 调车视图）
