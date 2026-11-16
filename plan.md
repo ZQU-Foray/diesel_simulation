@@ -3,7 +3,41 @@
 > 状态：`[x]` 已完成并有可追溯回执 · `[~]` 进行中 · `[ ]` 未开始。
 > 任意时刻中断后从这里恢复。
 
-## 当前断点（2026-11-11）
+## 当前断点（2026-11-16）
+
+分支 `fix/point-lio-sim-timing`（起自 `origin/dev` = `92709bb`）。M15 的代码与文档已落地、
+门禁与整链 A/B 已跑完，**尚未提交推送**。下一步：小步提交 → PR 到 `dev` → 等 CI。
+本轮**没有**改任何定位/导航参数，也**没有**改上游 vendored 仓（`pb2025_sentry_nav` /
+`point_lio` submodule / `ign_sim_pointcloud_tool`）。
+
+## M15 点云时序取证与里程计漂移量具（2026-11-16，分支 `fix/point-lio-sim-timing`）
+
+决策与全部证据见 `decision.md` D31。**本里程碑最重要的产出是一个被推翻的假设**：
+原以为 `timestamp_unit` 单位错导致运动补偿失效，实测证明现状才是对的。
+
+- [x] 点云形态取证：`/livox/lidar` 每帧恒 60000 点、字段只有 `x,y,z,intensity,ring`
+      （**无逐点 time**）→ gz `gpu_lidar` 是**瞬时快照**，不存在扫掠。有限点 9920（16.5%），
+      未命中保留 `inf`；raw ring 0…31 **各 1875 点**、方位角步长 0.192° 单调
+      → `% 1875` **正确**，"行宽取错"假设作废。
+- [x] stamp 语义取证：相邻帧差**精确 0.1 s**，`/clock - stamp` = 0.028–0.030 s（raw）
+      / 0.046–0.062 s（转换后）→ 是渲染与传输延迟，**不是**扫描结束打戳的 0.1 s 偏置。
+- [x] 外参核对：本链用 `models/diesel_sim_robot/model.sdf`（水平 `samples` **1875**），
+      雷达与 IMU **都没有自己的 `<pose>`** → 同原点，`extrinsic_T=[0,0,0]` + 单位阵**正确**。
+      （vendored 的 `mid360/model.sdf` 是 `samples=1500`，与本链无关，别再拿它对数。）
+- [x] **A/B 证伪原"修复"**：同一条 5.766 m 直行，`unit=2` → `max_xy_err=0.0324 m`/`0.094°` PASS；
+      `unit=0` → `0.1013 m`/`1.066°` FAIL。改单位会**注入**不存在的畸变，故**保留 2**。
+- [x] `diesel_sim_tools/lio_eval.py` + `test/test_lio_eval.py`：真值按被测消息 stamp 插值、
+      首帧刚体对齐、空阶段返回 `None`。6 组断言，含"延迟不算漂移"的正反双向断言。
+      `CMakeLists.txt` 注册 `tools_lio_eval`。
+- [x] `accept.py pio`：静止 → 直行 → 刹停三段开环量具，不依赖 Nav2；`--passive` 旁路观测；
+      `ROBOT_DID_NOT_MOVE` 守卫（真值位移 < `--min-path` 判 FAIL）；`finally` 无条件补发零速。
+- [x] `accept.py a3` 的 `max_xy_err` 改时间对齐 + `truth_aligned`/`truth_fallback` 计数；
+      verdict 判据未动。`a2` 保持原样（静止保持，延迟×速度=0）。
+- [x] `point_lio_sim.yaml` **只改注释**：写清 `timestamp_unit: 2` 为何故意、附 A/B 数字与复现命令；
+      顺手更正 `time_diff_lidar_to_imu` 的误导注释（本 fork **读了不用**）。
+- [x] 门禁回执：`check_style` / `check_tree_doc`（131 文件 / 40 目录双向一致）/ `check_layer` /
+      `ruff` / `black` 全绿；`test_lio_eval` PASS。
+- [ ] 提交 + PR 到 `dev` + CI 全绿。
 
 ## M12 ROS 运行时 namespace 统一（2026-11-12，分支 `feat/nav2-namespace`）
 
@@ -417,6 +451,21 @@ I9（组织规则同步）见 D14/D15；许可证见 D19。
 
 ## 阻塞与待确认
 
+- **I31（新，2026-11-16，阻塞 A3/A6）：先验图配准在运动中退化到 4/6，定位位姿偏 5.5 m**。
+  这是 D26 里被误记成"point_lio 运动下发散"的**真正成因**（更正见 D31）。整链实测：
+  `a3 result=ABORTED path_len_m=12.824 cross_samples=0 max_xy_err=5.495`，同期 point_lio
+  里程计只差 `max_xy_err=1.257`（静止段 0.19 m）。定位日志里退化随运动恶化：
+  `2/6 (condition=3555.6 点面约束=789)` → `3/6 (condition=6497.6)` →
+  `4/6 (condition=14654.8 点面约束=1184)`，而 `no valid`/`not converged` 计数为 **0**
+  ——配准一直"成功"，只是解在退化方向上不受约束。Nav2 因此在错帧里规划，从 (6,4) 往西南开
+  撞南墙卡 46 s。**本仓只装配，修不了**：需 `diesel_localization` 侧做退化方向处置
+  （不可观方向不更新 / 换约束 / 提高先验图高程结构）。
+  **触发条件**：`accept.py pio --passive` 与 `a3` 同跑时，若 `pio` 的 `move_max_xy_err` 合格
+  而 `a3` 的 `max_xy_err` 仍是米级，就是这一条，不要再去动 point_lio 参数。
+- **I32（新，2026-11-16）：首次配准失败没有重试路径**。D26 记过一次冷启动 52 条
+  `GICP 无有效对应` + `state_reason="no valid registration"` 后不自恢复。
+  **触发条件**：`ready` 超时且 `last_state=LOST`、`state_reason` 含 `no valid`，
+  重启定位节点即恢复 → 属于这一条，需 `diesel_localization` 侧补重试。
 - **I6 已解除阻塞**（2026-10-30）：根因是 `ang_bottom` 符号（D11）、`point_lio` 起步撞上
   Gazebo 沉降（D12）、健康时限贴着阈值抖动（D13），与 D9 推测的 executor/回调问题无关。
 - **环境依赖提醒**：软件渲染下点云帧率随宿主机负载从 7 Hz 掉到 4 Hz，D13 的时限是按
@@ -475,6 +524,15 @@ ros2 launch diesel_simulation_bringup simulation.launch.py headless:=true
 
 # 调车窗口：最小集（rviz/sim.rviz）
 ros2 launch diesel_simulation_bringup navigation_sim.launch.py gui:=true rviz:=true
+
+# 里程计漂移量具（D31）：起点必须落在 y≈2.0 的干净走廊，y=4 那条走 1.35 m 就撞墙
+ros2 launch diesel_simulation_bringup simulation.launch.py headless:=true x:=1.0 y:=2.0
+# 另开终端：转换工具 + point_lio（参数见 config/point_lio_sim.yaml），然后
+python3 src/diesel_simulation_bringup/scripts/accept.py pio --settle 8 --stop 4
+# 期望 move_max_xy_err≈0.03 m、verdict=PASS；把 point_lio 的 preprocess.timestamp_unit
+# 改成 0 再跑，应当变成 0.10 m / FAIL —— 那是被证伪的"修复"，量具会拦住它
+# 与 a3 同跑、分清里程计漂移与配准漂移：
+python3 src/diesel_simulation_bringup/scripts/accept.py pio --passive --duration 180
 
 # 调车窗口：全量视图（I11，已实现；开窗回执待容器）
 ros2 launch diesel_simulation_bringup navigation_sim.launch.py rviz:=true rviz_config:=tune.rviz

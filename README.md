@@ -23,6 +23,7 @@ ZQU-Foray 的 RMUL 2027 3v3 **场地仿真仓**：在 Gazebo 里搭出赛季场�
 | A9 | 桥接契约自检 | `accept.py ready` 对 `bridge.yaml` 每条 `expect` 断言对应 ROS 话题按方向存在发布者 / 订阅者；缺失时按条目 `id` 报错并非零退出（D20 类静默错接必须在这里被拦下） |
 | A10 | 下位机链路可用 | `mcu_link:=true` 时 `/cmd_vel` 经虚拟 USB CDC 交给**下位机固件源码**（`foray_mcu` 的 `host_sim` 后端），上位机 `RoboLinkHostLink` 状态稳定为 `Active`，固件侧 `robolink::Session` 进 `Ready/Active`；停掉任一端后 **≤500 ms** 双方判活失败，`/cmd_vel` 归零。链路只覆盖底盘平面速度，云台/发射机构不驱动（协议未冻结，见 D30） |
 | A11 | 链路自检 | `accept.py link` 打印 `link_state` / `hello_rtt_ms` / `status_hz` / `frame_errors` / `drop_detect_ms`，并在「握手未完成、状态帧断流（持续超过 500 ms）、失联未在 500 ms 内触发」时非零退出；加 `--expect-drop` 时额外要求「链路确实断过，且从最后一帧到判定断开 ≤ 540 ms」——由人停一端触发，停不下来就是 FAIL，不把「一直没断」当成「失联检测正常」 |
+| A12 | 里程计漂移可量 | `accept.py pio` 用开环运动（静止 → 直行 → 刹停）量 `/aft_mapped_to_init` 相对真值的**位移**误差：真值插值到里程计自己的 `header.stamp`、首帧刚体对齐，运动段 `max_xy_err ≤ 0.05 m` 且 `max_yaw ≤ 0.5°`；真值位移不足 `--min-path`（默认 1.0 m）时判 FAIL（车没走起来时「误差很小」是假象）。`--passive` 时不发 `cmd_vel`，只旁路观测，用来把「里程计漂了」与「先验图配准漂了」分开。阈值来自 D31 的 A/B 实测，不是拍脑袋 |
 
 进度与阶段划分见 `plan.md`；关键取舍见 `decision.md`。
 
@@ -51,7 +52,7 @@ diesel_simulation/
 │   │   ├── docs/                     # 场地规格与 STEP 审计
 │   │   ├── previews/                 # 场地预览图
 │   │   └── tools/                    # 上游审计/生成脚本（只读参考）
-│   ├── diesel_sim_tools/              # 装配库（纯 Python：引擎适配 / 桥接渲染 / profile）
+│   ├── diesel_sim_tools/              # 装配库（纯 Python：引擎适配 / 桥接渲染 / profile / 漂移口径）
 │   ├── diesel_sim_mcu/                # 过渡桥（RoboLink 从机侧 ↔ gz 车体速度，D30）
 │   └── diesel_simulation_bringup/     # 装配层（launch / profile / 桥接契约 / 地图 / 脚本）
 │       ├── map/rmul_2027/            # PCD + PGM + manifest.yaml（定位侧输入）
@@ -108,7 +109,7 @@ diesel_simulation/
 gz-sim 场地世界 (rmul_2027.sdf)
    └─ gpu_lidar + imu ─ ros_gz_bridge ─► /livox/lidar  /livox/imu
                                             │
-                     ign_sim_pointcloud_tool（补 time 字段）
+                     ign_sim_pointcloud_tool（合成 time 字段，见下方注）
                                             ▼
                                       point_lio ──► /aft_mapped_to_init（camera_init→body）
                                             │
@@ -129,6 +130,8 @@ gz-sim 场地世界 (rmul_2027.sdf)
 ```
 
 下行有两档：默认档把 `/cmd_vel` 直接桥进 gz，用来跑验收；`mcu_link:=true` 时接上虚拟下位机链路（§3.2），用来验证「上位机 ↔ 下位机」这段接口在仿真里也是真的。
+
+**点云是瞬时快照，不是扫掠**（D31）：gz 的 `gpu_lidar` 一帧 60000 条射线在同一时刻、同一位姿下渲染完成，桥过来的 `/livox/lidar` 连逐点 `time` 字段都没有。`ign_sim_pointcloud_tool` 按 `(point_id % 1875) * 0.1 / 1875` 合成的 0…0.1 s 是**不存在的扫掠**；`point_lio_sim.yaml` 故意用 `timestamp_unit: 2`（µs）把它压回 ≈0，这才是快照的物理真相。**不要顺手改成 0**——实测会把 5.77 m 直行的误差从 0.032 m 抬到 0.101 m，`accept.py pio` 会判 FAIL。
 
 先验地图与栅格**同源**：两者都从场地网格派生，因此定位与 Nav2 不会各说各话。
 不过两者的**判据不同**：定位吃官方 PGM 的稠密占据面，Nav2 需要底盘可通行栅格，
@@ -164,10 +167,15 @@ src/diesel_simulation_bringup/scripts/sim_up.sh
 ros2 run diesel_simulation_bringup accept.py ready --deadline 300
 ros2 run diesel_simulation_bringup accept.py a2 --duration 70
 ros2 run diesel_simulation_bringup accept.py a3 --x 2.0 --y 7.4
+
+# 7) 里程计漂移量具（A12；只需仿真 + 转换工具 + point_lio，不需要定位与 Nav2）
+#    起点落在 y≈2.0 的干净走廊（x∈[0.2,7.2]）；y=4 那条走 1.35 m 就撞墙
+ros2 launch diesel_simulation_bringup simulation.launch.py headless:=true x:=1.0 y:=2.0
+ros2 run diesel_simulation_bringup accept.py pio --settle 8 --stop 4
 ```
 
 `accept.py` 每条子命令只打印单行 `key=value` 并给出 `verdict=PASS|FAIL`，
-判据与 `decision.md` D13（A2）、D18（验收脚本入库）一致；没有真值时它会打印
+判据与 `decision.md` D13（A2）、D18（验收脚本入库）、D31（A12）一致；没有真值时它会打印
 `ground_truth=none` 而不是假装通过。
 
 ## 6. 地图判定口径（勿改而不留痕）
