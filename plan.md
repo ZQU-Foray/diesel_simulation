@@ -6,9 +6,10 @@
 ## 当前断点（2026-11-16）
 
 分支 `fix/point-lio-sim-timing`（起自 `origin/dev` = `92709bb`）。M15 已全部落地：
-四个逻辑提交 `4af3f8e` / `d730661` / `9f8c43e` / `55f76dc` 已推送，
-**PR #15 已开到 `dev`**（<https://github.com/ZQU-Foray/diesel_simulation/pull/15>），等 CI。
-下一步：CI 全绿后由主人决定合并；合并后再看 I31（先验图配准退化，属 `diesel_localization` 仓）。
+六个逻辑提交已推送，**PR #15 已开到 `dev`**
+（<https://github.com/ZQU-Foray/diesel_simulation/pull/15>），
+**CI 8/8 全绿**（run `43878944271` @ `d460d4f`），PR `MERGEABLE` / `CLEAN`。
+下一步：由主人决定合并；合并后再看 I31（先验图配准退化，属 `diesel_localization` 仓）。
 本轮**没有**改任何定位/导航参数，也**没有**改上游 vendored 仓（`pb2025_sentry_nav` /
 `point_lio` submodule / `ign_sim_pointcloud_tool`）。
 
@@ -45,7 +46,10 @@
       `UNIT=0` → `0.1013` / `1.066` **FAIL**。量具能拦住被证伪的"修复"。
 - [x] 四个逻辑提交 + PR #15 到 `dev`（`4af3f8e` / `d730661` / `9f8c43e` / `55f76dc`）；
       四个提交在临时 worktree 里各自独立通过 `check_tree_doc`。
-- [ ] PR #15 的 CI 全绿 → 由主人决定合并。
+- [x] PR #15 的 CI **8/8 全绿**（run `43878944271` @ `d460d4f`：`build-ros2` / `dir-layout` /
+      `doc-sync` / `file-hygiene` / `gate-selftest` / `layer-check` / `lint-c` / `lint-python`），
+      PR 状态 `MERGEABLE` / `CLEAN`。
+- [ ] 由主人决定合并 PR #15（合并后再看 I31，属 `diesel_localization` 仓）。
 
 ## M12 ROS 运行时 namespace 统一（2026-11-12，分支 `feat/nav2-namespace`）
 
