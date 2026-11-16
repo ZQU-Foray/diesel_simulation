@@ -478,6 +478,18 @@ I9（组织规则同步）见 D14/D15；许可证见 D19。
   `GICP 无有效对应` + `state_reason="no valid registration"` 后不自恢复。
   **触发条件**：`ready` 超时且 `last_state=LOST`、`state_reason` 含 `no valid`，
   重启定位节点即恢复 → 属于这一条，需 `diesel_localization` 侧补重试。
+- **I33（新，2026-11-16，本轮**主动不做**）：point_lio 的 IMU 初始化窗口与噪声口径**。
+  原计划打算把固定 `point_lio_delay:=4.0`（D12 的墙钟兜底）换成「静止判据门控」，
+  并 A/B `imu_meas_acc_cov` / `imu_meas_omg_cov`（现值 `0.1` 照真机抄，而仿真 IMU 无噪声）。
+  **不做的理由**：这两条都是为「point_lio 运动下发散」准备的放大器假设，而 D31 实测
+  证明该发散不存在（5.766 m 直行 `max_xy_err=0.0324 m` / `0.094°`），真正的米级偏差在
+  先验图配准（I31）。在没有可复现失败的情况下改初始化门控与协方差，属于**无证据的调参**，
+  会把一个已合格的基线推到未知状态。故本轮只登记、不动手。
+  **触发条件**：`accept.py pio` 在**冷启动**（`point_lio_delay` 调到 0–1 s，让 point_lio
+  撞上 Gazebo 沉降）下出现 `settle_max_xy_err` 分米级、或 `move` 段误差随时间单调增长；
+  届时先用 `pio` 做 `point_lio_delay` 的 A/B 确认因果，再改门控，最后才动协方差。
+  `MAX_INI_COUNT=100`（`IMU_Processing.h:26`，0.5 s@200 Hz）与 `laserMapping.cpp:488-508`
+  用 `mean_acc` 定初始重力并写进 kf 状态，是这条的机理入口。
 - **I6 已解除阻塞**（2026-10-30）：根因是 `ang_bottom` 符号（D11）、`point_lio` 起步撞上
   Gazebo 沉降（D12）、健康时限贴着阈值抖动（D13），与 D9 推测的 executor/回调问题无关。
 - **环境依赖提醒**：软件渲染下点云帧率随宿主机负载从 7 Hz 掉到 4 Hz，D13 的时限是按
