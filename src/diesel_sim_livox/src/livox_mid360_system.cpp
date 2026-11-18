@@ -187,6 +187,8 @@ class LivoxMid360System : public gzsim::System,
         this->rays->SetVerticalAngleMax(this->table.elevation_max());
         this->rays->SetRayCount(this->hCount);
         this->rays->SetVerticalRayCount(this->vCount);
+        // 近裁剪面 0.05 m：取盲区 0.1 m（Mid-360 规格）的一半，避免近处回波被裁剪；
+        // 远裁剪面 rangeMax+20 m：在最大量程外留 20 m 渲染余量，防止远端边缘被裁掉。
         this->rays->SetNearClipPlane(0.05);
         this->rays->SetFarClipPlane(this->rangeMax + 20.0);
         this->rays->SetClamp(true);
