@@ -22,7 +22,7 @@
     <exec_depend>diesel_localization_ros</exec_depend>
     <exec_depend>diesel_localization_bringup</exec_depend>
     <exec_depend>point_lio</exec_depend>
-    <exec_depend>ign_sim_pointcloud_tool</exec_depend>
+    <exec_depend>diesel_sim_livox</exec_depend>
     <exec_depend>nav2_bringup</exec_depend>
     <exec_depend>pb2025_robot_description</exec_depend>
     <exec_depend>rmoss_gz_base</exec_depend>

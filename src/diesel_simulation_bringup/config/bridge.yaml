@@ -21,12 +21,17 @@
   expect:
     required: true
 
-# 前向 Mid-360 点云 → point_lio / diesel_localization 消费的 /livox/lidar
+# 前向 Mid-360 点云 → point_lio / diesel_localization 消费的 /livox/lidar。
+# D32：ROS 侧改由 model 级 LivoxMid360System 插件直发 livox_ros_driver2/msg/CustomMsg
+# （非重复扫描 + 逐点时间戳），不再经 ros_gz_bridge——gz 无 CustomMsg 对应类型，桥不了。
+# 本条目保留供 A9 自检「/livox/lidar 在 ROS 侧有发布者」；launch 的 skip_ids 恒排除它。
+# 下方 gz_topic/gz_type 指向 model.sdf 里那个最小 gpu_lidar 渲染初始化触发器（其
+# PointCloudPacked 不桥接），仅为契约 schema 完整，非实际数据通路。
 - id: lidar_points
   gz_topic: >-
     /world/{world}/model/{robot}/link/{lidar_link}/sensor/{lidar_sensor}/scan/points
   ros_topic: /livox/lidar
-  ros_type: sensor_msgs/msg/PointCloud2
+  ros_type: livox_ros_driver2/msg/CustomMsg
   gz_type: ignition.msgs.PointCloudPacked
   direction: gz2ros
   expect:

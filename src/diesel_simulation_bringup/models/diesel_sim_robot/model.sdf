@@ -69,18 +69,22 @@
                 <ignition_frame_id>front_mid360</ignition_frame_id>
                 <always_on>1</always_on>
                 <visualize>false</visualize>
-                <!-- MID-360 实际出点率 10 Hz（Livox 手册默认值），软件渲染也能跟上 -->
+                <!-- MID-360 真实点云改由 model 级 LivoxMid360System 插件产出（非重复扫描 +
+                     逐点时间戳，D32）。此 gpu_lidar 仅作渲染初始化触发器：gz 的 Sensors 系统
+                     只有见到渲染型传感器才初始化渲染引擎、才发 SceneUpdate（IMU 非渲染型，
+                     单独存在时插件拿不到场景，renderinit 实测）。故保留一个最小网格，其
+                     PointCloudPacked 不桥接（bridge.yaml lidar_points 已 skip）。 -->
                 <update_rate>10</update_rate>
                 <lidar>
                     <scan>
                         <horizontal>
-                            <samples>1875</samples>
+                            <samples>32</samples>
                             <resolution>1</resolution>
                             <min_angle>-3.14159265</min_angle>
                             <max_angle>3.14159265</max_angle>
                         </horizontal>
                         <vertical>
-                            <samples>32</samples>
+                            <samples>4</samples>
                             <min_angle>-0.12217304764</min_angle>
                             <max_angle>0.90757121104</max_angle>
                         </vertical>
@@ -156,6 +160,16 @@
                 name="ignition::gazebo::systems::VelocityControl">
             <initial_linear>0 0 0</initial_linear>
             <initial_angular>0 0 0</initial_angular>
+        </plugin>
+
+        <!-- Livox Mid-360 非重复扫描传感器（D32）：自持细网格 GpuRays，渲染线程按官方
+             scan_mode/mid360.csv 角度表进程内采样，直发 livox_ros_driver2/msg/CustomMsg 到
+             /livox/lidar。pattern_csv 缺省时插件用 ament_index 自找本包 share 下的角度表，
+             故此处不写绝对路径。需 launch 设 IGN_GAZEBO_SYSTEM_PLUGIN_PATH 指向插件 lib。 -->
+        <plugin filename="LivoxMid360System" name="diesel::LivoxMid360System">
+            <link>front_mid360</link>
+            <topic>/livox/lidar</topic>
+            <frame_id>front_mid360</frame_id>
         </plugin>
     </model>
 </sdf>

@@ -22,7 +22,7 @@ navigation_sim.launch.py 里，这样单独调点云时不必拖起整链。
 
 import os
 
-from ament_index_python.packages import get_package_share_directory
+from ament_index_python.packages import get_package_prefix, get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import (
     AppendEnvironmentVariable,
@@ -198,6 +198,17 @@ def _assemble(context, share_dir):
         AppendEnvironmentVariable("GZ_SIM_RESOURCE_PATH", field.models_dir),
     ]
 
+    # model.sdf 里的 LivoxMid360System 插件（D32）按 filename 搜索，需把它的安装 lib
+    # 目录加进 gz 系统插件搜索路径。找不到包（裸环境未建插件）就跳过——gz 会报插件缺失，
+    # 但世界仍能起，便于定位问题而不是 launch 直接崩。
+    try:
+        livox_plugin_lib = os.path.join(get_package_prefix("diesel_sim_livox"), "lib")
+        actions.append(
+            AppendEnvironmentVariable("IGN_GAZEBO_SYSTEM_PLUGIN_PATH", livox_plugin_lib)
+        )
+    except Exception:
+        pass
+
     # -r 立刻开跑；headless 时用 -s 只跑服务器（服务器/CI 只跑物理与传感器）
     if gui:
         actions.append(
@@ -241,11 +252,16 @@ def _assemble(context, share_dir):
     )
 
     mcu_link = LaunchConfiguration("mcu_link").perform(context) == "true"
+    # lidar_points 恒让出：D32 后 /livox/lidar 由 LivoxMid360System 插件直发 CustomMsg，
+    # gz 无对应类型桥不了，条目只留给 A9 自检（bridge.yaml 注释）。
+    skip_ids = ["lidar_points"]
+    # mcu_link 时把 cmd_vel 这条桥也让给过渡桥（README §3.2 独占约束）
+    if mcu_link:
+        skip_ids.append("cmd_vel")
     arguments, remappings = gz_bridge_arguments(
         share_dir,
         sim_profile.assembly_context(field, robot),
-        # mcu_link 时把 cmd_vel 这条桥让给过渡桥（README §3.2 独占约束）
-        skip_ids=("cmd_vel",) if mcu_link else (),
+        skip_ids=tuple(skip_ids),
     )
     actions.append(
         Node(

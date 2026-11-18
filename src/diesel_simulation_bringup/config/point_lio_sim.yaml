@@ -2,9 +2,12 @@
 #
 # 来源：SMBU-PolarBear-Robotics-Team/pb2025_sentry_nav（dev 5f645d60）的
 #       pb2025_nav_bringup/config/simulation/nav2_params.yaml 中 `point_lio` 段，
-#       只改两处：节点名改 point_lio、输入话题指向本仓桥出的 /livox/lidar 与 /livox/imu。
-# 上游把点云当作 32 线机械式雷达处理（`lidar_type: 2`），因此前面串了
-# ign_sim_pointcloud_tool 补 `time`/`ring` 字段——仿真点云本身没有逐点时间戳。
+#       只改节点名与输入话题。
+# D32：点云改由 diesel_sim_livox 的 LivoxMid360System 插件直发
+#       livox_ros_driver2/msg/CustomMsg（非重复扫描 + 逐点 offset_time），故走
+#       Livox 预处理路径（lidar_type: 1，avia_handler），不再串 ign_sim_pointcloud_tool
+#       补假 time/ring。avia_handler 用 offset_time(ns)/1e6 作逐点时间，timestamp_unit
+#       在该路径不参与换算，这里取 3(ns) 与真车 mid360.yaml 口径一致。
 point_lio:
   ros__parameters:
     use_sim_time: True
@@ -12,13 +15,11 @@ point_lio:
     prop_at_freq_of_imu: True
     check_satu: True
     init_map_size: 10
-    # 上游按 32 线机械雷达（每帧数万点）设的 8，仿真雷达每帧只有约 1 万个
-    # 有效回波（60000 条射线里仅 16.6% 命中，见 D26 的实测），再每 8 点抽 1 点
-    # 会让配准源点降到不足 1300 点，GICP 找不到对应。
-    # 取 3 而不取 1：全量入 ikd-tree 会让单帧负担翻 8 倍，那一轮观测到的位姿发散
-    # 读数混了另一条链的时钟（见 D26 的测量纪律），没有干净复测，故先按「加点到
-    # 够用」而非「全量」推进；要放开到 1 需单独一轮对照。
-    point_filter_num: 3
+    # D32 后每帧只有约 2000 个有效回波（非重复角度表 20000 方向/帧，本场地约 10%
+    # 命中，见 D32 实测），远少于旧规则网格的约 1 万。此时再抽稀会让配准源点不足，
+    # 故取 1（全量）：单帧入 ikd-tree 的点数反而比旧链抽稀后还少，D26 担心的 8 倍
+    # 负担不再成立。非重复图案的价值在跨帧累积补角缝，单帧更要保住点数。
+    point_filter_num: 1
     space_down_sample: True
     # 同理：0.2 m 体素在 7 m 见方的场地里把墙面抽稀成几百点；0.1 m 兼顾点数
     # 与计算量。filter_size_map 保持 0.2 —— 它决定全局地图密度，改小对内存与
@@ -29,7 +30,7 @@ point_lio:
     runtime_pos_log_enable: False
 
     common:
-      lid_topic: "velodyne_points"
+      lid_topic: "livox/lidar"
       imu_topic: "livox/imu"
       con_frame: False
       con_frame_num: 1
@@ -43,9 +44,10 @@ point_lio:
       init_pose: [0.0, 0.0, 0.0]
 
     preprocess:
-      lidar_type: 2
-      scan_line: 32
-      timestamp_unit: 2
+      # D32：Livox 非重复扫描（avia_handler），4 个发射器对应角度表 line=i%4。
+      lidar_type: 1
+      scan_line: 4
+      timestamp_unit: 3
       blind: 0.5
 
     mapping:
