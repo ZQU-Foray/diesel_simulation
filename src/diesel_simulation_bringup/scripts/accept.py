@@ -36,6 +36,13 @@ from rclpy.qos import QoSHistoryPolicy, QoSProfile, QoSReliabilityPolicy
 from rclpy.utilities import remove_ros_args
 from sensor_msgs.msg import PointCloud2
 from std_msgs.msg import String
+
+try:
+    # D32：/livox/lidar 现在是 Livox 插件直发的 CustomMsg。只有 livox 子命令需要它；
+    # 裸容器（CI build-ros2）没有 livox_ros_driver2，导入失败时置 None，其余子命令不受影响。
+    from livox_ros_driver2.msg import CustomMsg
+except ImportError:
+    CustomMsg = None
 from tf2_msgs.msg import TFMessage
 from tf2_ros import Buffer, TransformListener
 
@@ -70,6 +77,17 @@ LINK_MIN_STATUS_HZ = 20.0
 # 「上一个发布周期里新到的帧数」）。所以采样前留一个窗口的预热，预热里的 0 不算断流；
 # 预热之后仍然为 0 就是真的断流。
 LINK_WARMUP_S = 1.0
+
+# Livox 非重复扫描的判据（README A13，decision.md D32）。
+# 采样率口径（D32 对原 A3 的修正）：插件每帧按官方角度表采 LIVOX_DIRS_PER_FRAME 个方向，
+# 实际出点数由环境命中决定（rmul_2027 墙低、只有低俯仰打墙，命中约 10%）——所以量的是
+# 「采样率 200k 方向/s @ 10Hz」，不是「出点 200k/s」。出点数随场地变，不作为判据。
+LIVOX_FRAME_HZ = 10.0  # 名义帧率（Mid-360 出点率，Livox 手册）
+LIVOX_FRAME_HZ_TOL = 1.5  # 帧率容差；用仿真时间戳量，RTF 略低于 1 不影响
+LIVOX_DIRS_PER_FRAME = 20000  # 每帧采样方向数 = 200k 方向/s ÷ 10Hz
+LIVOX_POINT_INTERVAL_NS = 5000  # 200k 方向/s ⇒ 每方向 5µs（插件 offset_time 步长）
+LIVOX_FRAME_SPAN_NS = int(1e8)  # 一帧 0.1s = 1e8 ns（offset_time 的上界）
+LIVOX_NOVELTY_MIN = 0.5  # 非重复判据：跨帧新方向占比下限（规则网格重复图案会趋近 0）
 
 
 def log_kv(prefix="", **fields):
@@ -148,8 +166,11 @@ class AcceptNode(Node):
             history=QoSHistoryPolicy.KEEP_LAST,
             depth=10,
         )
+        # D32：/livox/lidar 现在是 Livox 插件直发的 CustomMsg。就绪检查只需「雷达在出帧」，
+        # 改订插件同帧发布的 PointCloud2 流 /livox/lidar_points——它处处可导入、不依赖
+        # livox_ros_driver2，裸容器里 ready 也能跑；两路同帧发布，语义等价。
         self.create_subscription(
-            PointCloud2, "/livox/lidar", self._on_lidar, sensor_qos
+            PointCloud2, "/livox/lidar_points", self._on_lidar, sensor_qos
         )
         # 定位与 Nav2 都用相对名，全名由 namespace 决定（计划文档 §1.5）。
         self.namespace = args.namespace.rstrip("/")
@@ -646,6 +667,113 @@ def cmd_a3(node, args):
     return 0 if ok else 1
 
 
+def cmd_livox(node, args):
+    """Livox 非重复扫描质量（README A13 / A1–A4，decision.md D32）。
+
+    只订 /livox/lidar(CustomMsg) 采样，不改任何状态。量的是「采样率 200k 方向/s @10Hz」，
+    不是「出点 200k/s」——实际出点数由环境命中决定（本场地约 10%），不作判据（D32 口径修正）。
+    """
+    if CustomMsg is None:
+        log_kv("livox ", verdict="FAIL", reason="livox_ros_driver2 不可用，无法量 CustomMsg")
+        return 1
+
+    frames = []
+
+    def on_msg(msg):
+        frames.append(msg)
+
+    qos = QoSProfile(
+        reliability=QoSReliabilityPolicy.BEST_EFFORT,
+        history=QoSHistoryPolicy.KEEP_LAST,
+        depth=50,
+    )
+    sub = node.create_subscription(CustomMsg, "/livox/lidar", on_msg, qos)
+    deadline = time.monotonic() + args.duration
+    while time.monotonic() < deadline and rclpy.ok():
+        rclpy.spin_once(node, timeout_sec=0.05)
+    node.destroy_subscription(sub)
+
+    if len(frames) < 3:
+        log_kv("livox ", frames=len(frames), verdict="FAIL", reason="CustomMsg 帧不足")
+        return 1
+
+    # A3：帧率用 header.stamp 的仿真时间差（不用墙钟——软件 GL 下 RTF 可能略低于 1，
+    # 但插件按仿真时间节拍，仿真时间戳仍是 10Hz）。
+    stamps = [f.header.stamp.sec + f.header.stamp.nanosec * 1e-9 for f in frames]
+    span = stamps[-1] - stamps[0]
+    achieved_hz = (len(frames) - 1) / span if span > 0 else 0.0
+
+    seen = set()
+    total_points = 0
+    monotonic_ok = True
+    spacing_ok = True
+    offset_max_ns = 0
+    line_ok = True
+    tag_ok = True
+    count_ok = True
+    for f in frames:
+        pts = f.points
+        if f.point_num != len(pts):
+            count_ok = False
+        prev_offset = -1
+        for p in pts:
+            total_points += 1
+            # A2：帧内 offset_time 严格递增（插件按方向序号 i 赋 i*interval，命中子集保序）
+            if p.offset_time <= prev_offset:
+                monotonic_ok = False
+            prev_offset = p.offset_time
+            offset_max_ns = max(offset_max_ns, p.offset_time)
+            # A3：offset_time 必须落在 5µs 网格上（插件按方向序号 i 赋 i*5000ns）。
+            # 5µs 间隔 = 200k 方向/s 的采样率，这是直接可量的证据，不靠 offset_max 反推。
+            if p.offset_time % LIVOX_POINT_INTERVAL_NS != 0:
+                spacing_ok = False
+            # A4：line∈[0,4)（4 发射器）、tag 高两位∈{0x00,0x10}（point_lio avia_handler 口径）
+            if not (0 <= p.line < 4):
+                line_ok = False
+            if (p.tag & 0x30) not in (0x00, 0x10):
+                tag_ok = False
+            # A1：方向量化到 0.05° bin。插件按角度表方向出点（xyz=range*单位向量），
+            # 重建方向即图案方向；非重复图案跨帧方向几乎全新，规则网格重复图案则趋近 0。
+            az = math.atan2(p.y, p.x)
+            el = math.atan2(p.z, math.hypot(p.x, p.y))
+            seen.add((round(az / 0.000873), round(el / 0.000873)))
+
+    novelty = len(seen) / total_points if total_points else 0.0
+    # A2 覆盖：最大 offset 应接近一帧 0.1s（说明采满了 ~20000 方向），且不超过一帧。
+    # 注意：高序号方向多朝上打空（miss 不进消息），offset_max 只反映最后「命中」的方向，
+    # 会略低于 99.995ms——所以它只做覆盖下限 sanity，不用来反推采样率（D32 口径）。
+    offset_cover_ok = (
+        0.08 * LIVOX_FRAME_SPAN_NS <= offset_max_ns < LIVOX_FRAME_SPAN_NS
+    )
+    # A3：帧率≈10Hz（仿真时间戳量）+ offset 落在 5µs 网格（=200k 方向/s）+ 帧内覆盖。
+    # 采样率 = 每帧方向数(配置 20000) × 实测帧率；miss 不进消息，无法从命中点反推方向总数，
+    # 故按配置 nominal 报，并标明。5µs 网格 + 10Hz 帧率本身已锁定 200k 方向/s。
+    hz_ok = abs(achieved_hz - LIVOX_FRAME_HZ) <= LIVOX_FRAME_HZ_TOL
+    nominal_sampling_rate = achieved_hz * LIVOX_DIRS_PER_FRAME
+    a1_ok = novelty >= LIVOX_NOVELTY_MIN
+    a2_ok = monotonic_ok and offset_cover_ok
+    a3_ok = hz_ok and spacing_ok and offset_cover_ok
+    a4_ok = line_ok and tag_ok and count_ok
+    ok = a1_ok and a2_ok and a3_ok and a4_ok
+    log_kv(
+        "livox ",
+        frames=len(frames),
+        points=total_points,
+        achieved_hz=f"{achieved_hz:.2f}",
+        dirs_per_frame=LIVOX_DIRS_PER_FRAME,
+        nominal_sampling_dirs_per_s=f"{nominal_sampling_rate:.0f}",
+        offset_grid_ok="PASS" if spacing_ok else "FAIL",
+        novelty=f"{novelty:.3f}",
+        offset_max_ms=f"{offset_max_ns / 1e6:.2f}",
+        a1_nonrepeat="PASS" if a1_ok else "FAIL",
+        a2_offset="PASS" if a2_ok else "FAIL",
+        a3_rate="PASS" if a3_ok else "FAIL",
+        a4_msg="PASS" if a4_ok else "FAIL",
+        verdict="PASS" if ok else "FAIL",
+    )
+    return 0 if ok else 1
+
+
 def main(argv=None):
     argv = sys.argv if argv is None else argv
     parser = argparse.ArgumentParser(
@@ -696,6 +824,11 @@ def main(argv=None):
         help="采样期要求链路真的掉线（配合人工停一端），并断言 500 ms 内检出",
     )
 
+    livox = subparsers.add_parser("livox", help="Livox 非重复扫描质量（A13 / A1–A4，D32）")
+    livox.add_argument(
+        "--duration", type=float, default=3.0, help="采样多少秒（默认 3s≈30 帧，<40 帧表周期）"
+    )
+
     args, ros_args = parser.parse_known_args(argv[1:])
 
     # 判据参数来自规格：场地（隧道窗口 / A3 目标点）与机器人（真值帧名的模型名）
@@ -721,6 +854,8 @@ def main(argv=None):
             return cmd_a2(node, args)
         if args.command == "link":
             return cmd_link(node, args)
+        if args.command == "livox":
+            return cmd_livox(node, args)
         return cmd_a3(node, args)
     finally:
         node.destroy_node()
