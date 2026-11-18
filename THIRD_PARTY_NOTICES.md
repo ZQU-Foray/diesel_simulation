@@ -15,7 +15,16 @@
 上述仓以 **Apache License 2.0** 发布；本仓对其的引用不改变其许可证。复制片段处均在
 文件头注明来源。
 
-## 2. guodong_sentry_sim 场地迁移包
+## 2. Livox-SDK（livox_laser_simulation，MIT）
+
+| 上游仓 | 本仓借鉴的内容 | 位置 |
+|---|---|---|
+| [`livox_laser_simulation`](https://github.com/Livox-SDK/livox_laser_simulation) | Mid-360 非重复扫描角度表 `scan_mode/mid360.csv`（800000 点 = 40 帧 × 20000，逐点 Time/Azimuth/Zenith）；本仓 gz sensor 插件按此表逐点采样（D32） | `src/diesel_sim_livox/scan_mode/mid360.csv.gz`（gzip 压缩，内容未改） |
+
+上游以 **MIT License** 发布。本仓仅取角度表数据文件，未复制其插件代码——上游插件面向
+ROS1 Melodic / Gazebo classic 9，本仓按 Fortress + ROS 2 重写为独立的 gz system 插件。
+
+## 3. guodong_sentry_sim 场地迁移包
 
 `src/diesel_rmul_2027_field/` 下的网格、地图、场地复核参数与预览图来自迁移包
 `RMUL2027_map_transfer_20261016_STEP_R1`。该包 `SOURCE_NOTICE.txt` 原文要点：
@@ -28,19 +37,19 @@
 迁移包的 `DEPENDENCIES.md` 声明的运行前提（ROS 2 Jazzy + Gazebo Harmonic）与本仓
 （Humble + Fortress）不同代，本仓只取**资产**，启动链路按 Fortress 重写。
 
-## 3. 未入库的资源
+## 4. 未入库的资源
 
 | 资源 | 未入库原因 | 获取方式 |
 |---|---|---|
 | `source_cad/RMUL2027_3V3_V1.0.0.stp`（1.99 MB，官方 STEP） | 版权归 RoboMaster 官方，仅用于几何审计 | 迁移包 `source_cad/`，或规则手册官方下载 |
 | 上游 `pcd/simulation/*.pcd` 先验点云（`pb2025_sentry_nav`） | 上游本身不入库（网盘分发） | 本仓改为**由场地网格自行采样**，不依赖该资源 |
 
-## 4. RoboMaster 社区 wiki
+## 5. RoboMaster 社区 wiki
 
 [RoboMaster 社区 wiki 仿真链路条目](https://bbs.robomaster.com/wiki/4577/714072) 仅作
 **做法参考**，未复制其中代码或图片。
 
-## 5. 本仓自身的许可
+## 6. 本仓自身的许可
 
 本仓自有代码与文档以 **Apache License 2.0** 发布，全文见仓根 [`LICENSE`](LICENSE)，
 版权行：`Copyright 2026 ZQU-Foray`。两个 `package.xml` 的 `<license>` 字段同为
@@ -50,5 +59,5 @@
 Apache-2.0，同一许可证可以逐文件搬用片段而不引入许可证混用；同时保留专利授权与
 免责条款。
 
-注意 §2 的场地迁移包与官方 STEP 文件**不在** Apache-2.0 覆盖范围内：本仓只对自有
+注意 §3 的场地迁移包与官方 STEP 文件**不在** Apache-2.0 覆盖范围内：本仓只对自有
 代码与文档授权，DJI / RoboMaster 图样与规则手册内容的版权仍归其所有者。

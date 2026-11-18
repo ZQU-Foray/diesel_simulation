@@ -690,3 +690,84 @@ PTY 无法检测对端是否打开，host 后端以「端口打开即 connected�
 
 回退：`mcu_link` 默认 `false`，链路整段不装配，回归到 D29 的直连桥；固件侧 `platform/host_sim/`
 与 `config/profiles/sim_dm_mc02/` 是纯新增，删除不影响 ARM 构建与既有 profile。
+
+## D32 点云用「gz sensor 插件 + 官方 Livox 角度表」做非重复扫描，替换规则网格快照
+
+Context：旧仿真点云是 `gpu_lidar` 的**规则网格瞬时快照**（`width=1875` × `height=32`，一帧
+所有点同一位姿渲染），与真车 MID-360 的**非重复 rosetta 扫描 + 逐点时间戳**严重不符——
+`point_lio` 的 `avia_handler` 拿不到真实的 `offset_time` 分布，运动去畸变在仿真里被假数据
+喂偏。这是早期为跑通整链做的有意妥协（与兄弟分支 `fix/point-lio-sim-timing` 的 D31 记录的
+快照时间戳问题同源）。用户明确指出「仿真的点云没有吻合 Mid-360 的非重复扫描效果，与真车
+严重不符」，要求在三个方案（A 真车 bag 回放 / B 角度表重采样 / C 移植 gz sensor 插件）里
+选 **C** 落地。
+
+Decision：
+
+1. **新增 `diesel_sim_livox` gz system 插件，自持细网格 `GpuRays`，渲染线程进程内采样**。
+   插件按官方 `mid360.csv` 角度表（800000 点 = 40 帧 × 20000，`line = i % 4`）逐点取方向，
+   从 `GpuRays` 缓冲按方向采样深度，`rclcpp` 直发 `livox_ros_driver2/CustomMsg`。一帧 20000
+   个方向、`offset_time = i × 5000 ns`（5 µs 网格 = 200k 方向/s）、`tag = 0x10`、`timebase`
+   为帧首仿真时间。
+2. **不用 `RayQuery`，唯一批量机制是 `GpuRays`**。源码取证：CPU 路径
+   `Ogre2RayQuery.cc` 的 `ClosestPointByIntersection` 暴力遍历所有三角形无空间加速
+   （场地 3511 三角形 × 200k/s ≈ 7 亿次求交/秒）；GPU 选择缓冲 `Ogre2SelectionBuffer.cc`
+   的 `ExecuteQuery` 每射线一次整场渲染 + 回读。两条路都撑不住 200k 方向/s。
+3. **网格取 2048×336，放弃 4096×672**。`GpuRays` 1st pass 面分辨率 =
+   `clamp(next_pow2(max(hs, vs)), 128, 1024)`：1875×32 与 2048×336 都落 512²（1st pass
+   代价同现状），4096×672 落 1024²（4× 代价）。进程内 bench：2048×336 单帧 update 17.78 +
+   copy 1.25 ≈ 19 ms → 52.6 Hz（**5× 余量**）；4096×672 ≈ 85 ms/帧（否掉）。独立进程订
+   `LaserScan` 的细网格 points/s 卡在 6.1–6.2M，**瓶颈是序列化 + IPC 不是 GPU**——进程内
+   读缓冲绕开 2.75 MB/帧的 IPC，这是选「插件进程内采样」而非「插件发点云再桥接」的理由。
+4. **同帧发两路话题**。`CustomMsg → /livox/lidar`（喂 `point_lio` 的 Livox 路径）+
+   `PointCloud2 → /livox/lidar_points`（喂 `diesel_localization`，它只订 `PointCloud2`，
+   `localization_node.cpp:191`）。两路用同一份采样点 / 仿真时间 / frame_id，保证同帧一致。
+5. **诚实限制：单帧瞬时快照采样，不做帧内运动畸变的物理仿真**。一帧 20000 点在同一位姿
+   渲染，`offset_time` 是按序号合成的良构时间戳。达成的是：真非重复角度 ✓、Livox 预处理
+   路径激活 ✓、逐点时间戳良构 ✓；**不达成**帧内运动畸变的物理仿真（列为非目标）。
+6. **命中率 ~10% 是场地属性，不是缺陷**。本场地墙高 0.42 m、雷达高 0.3 m，俯仰 ≤ +5°
+   的方向仅占 24.4%，约 75% 方向朝上打空 ⇒ 一帧 20000 方向只出 ~2000 点。故验收口径
+   （A13 的 a3_rate）是「采样率 200k 方向/s @ 10 Hz，出点数由环境命中决定」，**不要求
+   200k 点/s**。
+
+Reason：这条改动的验证价值在「点云保真度」而非「物理仿真」。官方角度表保证非重复图案
+与真车一致（novelty 实测 0.963，规则网格会趋近 0）；进程内采样绕开 IPC 瓶颈，让 200k
+方向/s 在软件渲染下也跑得动。把「点云长得像真车」和「定位能不能收敛」分开验——前者本仓
+负责，后者是 `diesel_localization` 的算法问题。
+
+Consequences：新增 **A13**（非重复扫描质量，`accept.py livox` 四子项 a1–a4），见 README §1；
+**A1 改写**为 Livox 非重复 `CustomMsg` + 同帧伴生 `PointCloud2`；`model.sdf` 的 `gpu_lidar`
+缩到 32×4 仅作渲染初始化触发器（IMU-only 实测不起渲染引擎），数据不桥接；`point_lio_sim.yaml`
+切 `lidar_type=1` / `scan_line=4` / `timestamp_unit=3` / `point_filter_num=1`；假扫掠转换器
+`ign_sim_pointcloud_tool`（`cloud_tool`）退役。**README A2（定位收敛）当前 FAIL**：忠实非重复
+点云把墙面点从旧规则网格的 ~10000/帧降到 ~2000/帧，暴露 `diesel_localization` 在本场地
+（7 m 见方、墙高 0.42 m，只有低俯仰打墙）的可观测性不足——`a2` 实测 `max_xy_err` 在
+0.314 ↔ 0.690 间波动（阈值 0.30），均 FAIL，`last_state=DEGRADED reason="insufficient
+observability"`。**这是跨仓定位算法的已知限制，主人已拍板接受为已知限制、先交付插件**
+（不降 A2 阈值放水）。曾试 `points_per_frame=40000` 加密，`a2` 反而 `samples=0 last_state=LOST`，
+已回退默认 20000。D31（快照时间戳 / `timestamp_unit` A/B）在兄弟分支 `fix/point-lio-sim-timing`
+（PR #15 待合），本分支决策编号用 D32 自包含，合并时由主人协调编号。
+
+实现与验证（2026-11-18）：
+
+- 新包 `src/diesel_sim_livox/`：`pattern.hpp/.cpp`（纯核心：`PatternTable::LoadCsv` /
+  `RangeGrid::Sample` 反深度双线性 / `SampleFrame`）+ `livox_mid360_system.cpp`（world 插件，
+  `ISystemConfigure` + `ISystemPostUpdate`，渲染线程 `OnPostRender` 采样）+ `scan_mode/mid360.csv.gz`
+  （6.5 MB）+ `test/`（pattern 34 断言 + 包断言）。角度约定经双箱标定与 `GpuRays` 一致
+  （azimuth 从 +x 朝 +y CCW、elevation v 增朝上），无需修正。
+- 整链回执（`ROS_DOMAIN_ID=98`、`GZ_PARTITION=livoxonly$$`、软件渲染）：
+  `livox frames=25 points=48053 achieved_hz=9.90 dirs_per_frame=20000
+  nominal_sampling_dirs_per_s=198020 offset_grid_ok=PASS novelty=0.963 offset_max_ms=63.04
+  a1_nonrepeat=PASS a2_offset=PASS a3_rate=PASS a4_msg=PASS verdict=PASS`。
+  `offset_max_ms=63.04` 只反映最后**命中**方向（高序号朝上打空），不反推采样率。
+- `point_lio` 日志 `lidar_type:1`、IMU Initializing 100%、`/aft_mapped_to_init` 存在 ⇒
+  Livox 预处理路径真激活（本决策核心目标）。`diesel_localization` 收云配准但持续退化
+  （condition 4292–54817、点面约束 366–742），即上文 A2 受限。
+- `a2` 复跑（同链 `--duration 40`）：`samples=5438 max_xy_err=0.690 max_yaw=5.422 lost=0
+  last_state=DEGRADED verdict=FAIL`（另一轮 0.314/1.509，均 FAIL，跑跑不稳定）。
+- A9 回归：`bridge_missing=none`（五条契约 ROS 侧均有对端；`lidar_points` 的 `ros_type`
+  改 `CustomMsg`，`gz_topic` 指向触发器仅 schema 完整，`skip_ids` 恒含 `lidar_points`）。
+
+回退：`diesel_sim_livox` 是纯新增包，删除不影响其余包；`model.sdf` 移除 model 级 plugin、
+`gpu_lidar` 尺寸回 1875×32、`bridge.yaml` 的 `lidar_points` 改回 `PointCloud2`、`point_lio_sim.yaml`
+回 `lidar_type=2` / `scan_line=32` / `timestamp_unit=2`、`localization_sim.launch.py` 恢复 `cloud_tool`
+与 `cloud_topic=/livox/lidar`，即回到旧规则网格快照链路。

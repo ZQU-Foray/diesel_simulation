@@ -107,6 +107,56 @@ Invalid frame ID "odom"`，costmap 永不激活 ⇒ `ready` 卡在 lifecycle。
 修后 `ready=PASS`、`a2` PASS（回执见 M12）。本重构分支 rebase 到 `dev` 后已带上该修复；
 原先另开的任务 `nav2-ns-tf-remap` 随之作废（需求记录已标注作废原因）。
 
+## M15 Livox 非重复扫描点云（2026-11-18，分支 `feat/livox-gz-sensor`）
+
+需求见 README §1 的 A1（改写）/ A13；关键取舍见 `decision.md` D32。
+基线：`origin/dev` 的 `92709bb`。
+
+目标：用 gz sensor 插件 + 官方 mid360 角度表替换规则网格快照，让 `/livox/lidar` 变成
+非重复 `CustomMsg`、`point_lio` 走 Livox 预处理路径（`avia_handler` 直接用逐点 `offset_time`），
+同帧伴生 `PointCloud2` 供 `diesel_localization`。诚实限制：单帧瞬时快照采样，不做帧内
+运动畸变的物理仿真（D32 第 5 条）。
+
+- [x] I1 新包骨架 `src/diesel_sim_livox/`：`package.xml` / `CMakeLists.txt` / `.diesel-layer`
+      （layer:META）/ `scan_mode/mid360.csv.gz`（官方角度表 800000 点）/ `README.md`。
+      CI 约束：裸 `ros:humble` 容器拿不到 `livox_ros_driver2`/`point_lio` ⇒ 插件 `find_package QUIET`
+      缺则跳过（照 `diesel_sim_mcu` 对 `diesel_platform_core` 先例）。
+- [x] I2 纯核心 `pattern.hpp/.cpp`：`PatternTable::LoadCsv` / `RangeGrid::Sample`（反深度双线性，
+      四角有效且 max/min ≤ 1.25 插值否则最近邻）/ `SampleFrame` / `DirectionToUnitVector`。
+      `test/pattern_test.cpp` 34 断言 + `test_pattern.py` / `test_package.py`。
+- [x] I3 `livox_mid360_system.cpp`：world 插件（`ISystemConfigure` + `ISystemPostUpdate`），
+      自持细网格 `GpuRays`（2048×336），渲染线程 `OnPostRender` 按角度表采样直发 `CustomMsg`。
+      角度约定经双箱标定与 `GpuRays` 一致，无需修正。spike 验证 frame=1/51 points~2049/20000。
+- [x] I4 接线：`model.sdf` `gpu_lidar` 缩 32×4 仅渲染触发器 + model 级 plugin；`bridge.yaml`
+      `lidar_points` `ros_type` 改 `CustomMsg`（留 A9）；`simulation.launch.py` `skip_ids` 恒含
+      `lidar_points` + `IGN_GAZEBO_SYSTEM_PLUGIN_PATH`。插件 `pattern_csv` 默认走 `ament_index_cpp` 自找。
+- [x] I5 配置切换：`point_lio_sim.yaml` `lidar_type=1` / `scan_line=4` / `timestamp_unit=3` /
+      `lid_topic=livox/lidar` / `point_filter_num=1`；`localization_sim.launch.py` `cloud_topic` →
+      `/livox/lidar_points`、删 `cloud_tool`（假扫掠转换器退役）。整链实测 `point_lio` `lidar_type:1`、
+      IMU Initializing 100%、`/aft_mapped_to_init` 存在 ⇒ Livox 路径真激活。
+- [x] I6 `accept.py livox` 子命令（A13 / a1–a4）+ 修复 `AcceptNode` 订阅类型 bug（`/livox/lidar`
+      已改 `CustomMsg`，就绪检查改订同帧的 `/livox/lidar_points`）。A3 度量修正：原 `offset_max`
+      反推采样率误导（高序号方向朝上打空），改量帧率 ≈ 10 Hz + offset 落 5 µs 网格 + nominal
+      采样率 = 20000/帧 × 帧率。
+- [x] I7 收尾：README A1 改写 + A13 新增 + §2/§3、`decision.md` D32、`tree.md` 新包；
+      端到端复核；门禁全绿。
+
+回执（2026-11-18，`ROS_DOMAIN_ID=98`、`GZ_PARTITION=livoxonly$$`、软件渲染）：
+
+- `livox frames=25 points=48053 achieved_hz=9.90 dirs_per_frame=20000
+  nominal_sampling_dirs_per_s=198020 offset_grid_ok=PASS novelty=0.963 offset_max_ms=63.04
+  a1_nonrepeat=PASS a2_offset=PASS a3_rate=PASS a4_msg=PASS verdict=PASS`（novelty=0.963 实证非重复）。
+- `point_lio` `lidar_type:1`、IMU Initializing 100%、`/aft_mapped_to_init` 存在 ⇒ Livox 路径激活。
+- A9：`bridge_missing=none`。`diesel_sim_tools` pytest 19 passed、`pattern_test` 34 断言、lint-c / file-hygiene 绿。
+- **README A2 当前 FAIL（已知限制，主人已接受）**：`a2 max_xy_err` 0.314 ↔ 0.690（阈值 0.30）
+  均 FAIL，`last_state=DEGRADED reason="insufficient observability"`。根因是忠实非重复点云
+  （墙面点 ~2000/帧 vs 旧规则网格 ~10000/帧）暴露 `diesel_localization` 本场地可观测性不足，
+  属跨仓定位算法问题，不降阈值放水。曾试 `points_per_frame=40000` → `samples=0 last_state=LOST`，已回退。
+
+未完成（跨仓）：README A2 收敛需 `diesel_localization` 侧改善本场地可观测性（owner 定位组）；
+D31（快照时间戳 / `timestamp_unit` A/B）在兄弟分支 `fix/point-lio-sim-timing`（PR #15 待合），
+合并时由主人协调决策编号。提交 hash 见本里程碑受控提交记录。
+
 ## M14 虚拟下位机链路（2026-11-13，分支 `feat/mcu-link-sim`）
 
 需求见 README §1 的 A10 / A11 与 §3.2；关键取舍见 `decision.md` D30。
