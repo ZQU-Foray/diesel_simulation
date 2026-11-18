@@ -1,0 +1,26 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+    <name>diesel_sim_livox</name>
+    <version>0.1.0</version>
+    <description>
+        Livox Mid-360 非重复扫描仿真传感器：gz(Ignition Fortress) system 插件自持细网格
+        GpuRays，在渲染线程按 Livox 官方 scan_mode/mid360.csv 的非重复角度表进程内采样，
+        产出带逐点时间戳的 livox_ros_driver2/msg/CustomMsg，替换 gpu_lidar 的规则网格
+        瞬时快照，让 point_lio 的 Livox 预处理路径（lidar_type=1，avia_handler）在仿真里
+        真正被执行（README A13、decision.md D32）。
+    </description>
+    <maintainer email="ryanz@example.com">RyanZ</maintainer>
+    <license>Apache-2.0</license>
+
+    <buildtool_depend>ament_cmake</buildtool_depend>
+
+    <depend>rclcpp</depend>
+    <depend>ament_index_cpp</depend>
+    <depend>sensor_msgs</depend>
+    <depend>livox_ros_driver2</depend>
+
+    <export>
+        <build_type>ament_cmake</build_type>
+    </export>
+</package>
