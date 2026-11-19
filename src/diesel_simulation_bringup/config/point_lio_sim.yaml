@@ -36,7 +36,10 @@ point_lio:
       con_frame_num: 1
       cut_frame: False
       cut_frame_time_interval: 0.05
-      # 仿真里雷达与 IMU 同在世界时钟下，无需标定偏置
+      # 注意：本 fork 的 point_lio **读了这个参数但从不使用**（parameters.cpp 读进
+      # time_diff_lidar_to_imu，li_initialization.cpp 用的是恒 0 的
+      # time_lag_IMU_wtr_lidar）。想靠它补雷达/IMU 时间偏置是无效的，见 D31。
+      # 仿真里两者同在世界时钟下、且 SDF 里两个 sensor 同原点，本来也不需要偏置。
       time_diff_lidar_to_imu: 0.0
 
     prior_pcd:
@@ -44,9 +47,20 @@ point_lio:
       init_pose: [0.0, 0.0, 0.0]
 
     preprocess:
-      # D32：Livox 非重复扫描（avia_handler），4 个发射器对应角度表 line=i%4。
+      # D32：点云改由 diesel_sim_livox 插件直发，走 Livox 预处理路径（avia_handler），
+      # 4 个发射器对应官方角度表的 line=i%4。
       lidar_type: 1
       scan_line: 4
+      # timestamp_unit 在 avia_handler 里**不参与换算**：逐点时间直接取 CustomMsg 的
+      # offset_time（ns），curvature = offset_time / 1e6。这里取 3(ns) 只是与真车
+      # mid360.yaml 的口径对齐，改成 2 或 0 都不影响仿真结果。
+      #
+      # 历史留痕（D31，勿删）：旧链是 ign_sim_pointcloud_tool 把 gz gpu_lidar 的瞬时快照
+      # 按 (point_id % 1875) * 0.1 / 1875 合成一个**并不存在**的 0…0.09995 s 扫掠，
+      # 那时 timestamp_unit: 2（µs）是刻意的，把假扫掠压回 ≈0 才等于快照的物理真相。
+      # 同一 5.77 m 直行的 A/B：unit=2 → pio move_max_xy_err=0.0324 m PASS；
+      # unit=0 → 0.1013 m FAIL。D32 起转换器退役、真扫掠由角度表给出，这条约束随之作废；
+      # 若将来回退到 gpu_lidar 快照链，必须恢复 timestamp_unit: 2，不要随手改成 0。
       timestamp_unit: 3
       blind: 0.5
 

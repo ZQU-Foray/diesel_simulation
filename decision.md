@@ -691,6 +691,117 @@ PTY 无法检测对端是否打开，host 后端以「端口打开即 connected�
 回退：`mcu_link` 默认 `false`，链路整段不装配，回归到 D29 的直连桥；固件侧 `platform/host_sim/`
 与 `config/profiles/sim_dm_mc02/` 是纯新增，删除不影响 ARM 构建与既有 profile。
 
+---
+
+## D31 仿真的点云是瞬时快照：`timestamp_unit: 2` 是对的，"运动下发散"要先分清里程计与配准
+
+Context：D26 把「运动状态下 point_lio 会发散」记成未解项（`a3` ABORTED、`path_len_m=356`、
+`max_xy_err=262`），当时的怀疑集中在程序侧的点云时序：`ign_sim_pointcloud_tool` 写
+`new_point.time = (point_id % horizon_scan_) * 0.1f / horizon_scan_`（单位**秒**），而
+`point_lio_sim.yaml` 声明 `timestamp_unit: 2`（µs），于是 `curvature = time * 1e-3 ≈ 1e-4 ms`，
+`laserMapping.cpp:583` 的 `time_current = curvature / 1000.0 + pcl_beg_time` 把整帧压成同一时刻，
+看起来"运动补偿被关掉了"。顺着这条线还怀疑了 `% horizon_scan` 取错行宽、`header.stamp`
+是扫描结束时刻而偏 0.1 s。**这三条假设全部被实测推翻**，下面按证据留痕。
+
+Decision：
+
+1. **保留 `timestamp_unit: 2`，并在 yaml 里写明"故意如此、不要顺手改成 0"**。
+   gz 的 `gpu_lidar` 是**瞬时快照**：一帧 60000 条射线在同一时刻、同一位姿下渲染完成，
+   桥过来的 `/livox/lidar` 字段只有 `x, y, z, intensity, ring`，**根本没有逐点 time**。
+   转换器合成的那个 0…0.09995 s 扫掠是**不存在的东西**；按 µs 解释后 `curvature ≈ 0`，
+   恰好等于快照的物理真相。改成 0 是把假扫掠当真，会**注入**不存在的畸变。
+2. **不新增本仓的点云预处理节点**。原计划打算自己写一个节点重算逐点时间并平移 stamp，
+   既然快照没有扫掠可补、stamp 也没有系统性偏置，这个节点就是纯粹的多余复杂度。
+3. **验收侧新增 `accept.py pio`：不依赖 Nav2 的开环运动量具**。口径两条硬规矩：
+   真值必须**插值到被测消息自己的 `header.stamp`**；误差只比**位移**（首帧做一次刚体对齐）。
+   纯函数部分落在 `diesel_sim_tools/lio_eval.py`，宿主无 ROS 也能单测。
+4. **`a3` 的 `max_xy_err` 改用同一套时间对齐口径**，并新增 `truth_aligned` / `truth_fallback`
+   计数。`a3` 的 verdict 仍由 `SUCCEEDED` + `cross_samples` 决定，判据不动——改的只是诊断量。
+   `a2` 保持原样：它是静止保持，速度为 0，延迟乘速度仍是 0。
+5. **D26 的归因更正**：`a3` 失败的主因**不是 point_lio**，而是 `diesel_localization`
+   的先验图配准在运动中退化。两者必须分开量，`pio --passive` 就是为此存在。
+
+Reason：
+
+- **快照的证据**（`/livox/lidar` 与 `/velodyne_points` 各采多帧解码）：每帧恒 60000 点；
+  有限点 9920（16.5%），未命中射线保留为 `inf` 而非丢点；raw 的 ring 0…31 **各 1875 点**，
+  方位角步长 0.192° = 360/1875 且单调递增 → **`% 1875` 是正确的**，行宽假设作废。
+  只有 ring 0…5（仰角 -7°…+2.5°）有回波，`inf` 点仰角算成 45° 被转换器塞进 ring 27，
+  但 point_lio 按 `det_range` 丢掉，无害。
+- **stamp 的证据**：raw 相邻帧 `header.stamp` 差**精确 0.1 s**；`/clock - stamp` 为
+  0.028–0.030 s（raw）、0.046–0.062 s（转换后，多约 20 ms 处理）。这是渲染与传输延迟，
+  **不是**"扫描结束打戳"造成的 0.1 s 系统偏置，不需要平移 stamp。
+- **外参的证据**：本链实际用的模型是 `src/diesel_simulation_bringup/models/diesel_sim_robot/model.sdf`
+  （**不是** vendored 的 `pb2025_robot_description/.../mid360/model.sdf`，后者 `samples=1500`
+  与本链无关）。本链 SDF 水平 `samples` 就是 **1875**，且 `front_mid360_lidar` 与
+  `front_mid360_imu` **都没有自己的 `<pose>`** → 两个 sensor 同原点，
+  `extrinsic_T: [0,0,0]` 与单位阵 `extrinsic_R` **正确**。
+- **A/B 的证据**（同一条 5.766 m 直行，唯一变量是 `timestamp_unit`）：
+
+  | 口径 | `move_max_xy_err` | `move_max_yaw` | verdict |
+  |---|---|---|---|
+  | `unit=2`（现状） | **0.0324 m** | **0.094°** | PASS |
+  | `unit=0`（原计划的"修复"） | 0.1013 m | 1.066° | FAIL |
+
+  改单位让位置误差差 3.1 倍、偏航误差差 11 倍。**原计划的主因假设被证伪。**
+- **量具自身制造误差的证据**：`/aft_mapped_to_init` 的戳取 `lidar_end_time`
+  （`laserMapping.cpp:274`），比 `/clock` 落后约 0.10 s（`pio` 的 `*_max_latency_s` 直接量到）。
+  拿"最新里程计"比"最新真值"时，5.77 m 直行量出 0.13 m；把真值插值到里程计自己的 stamp 后
+  降到 0.028 m。**差值就是延迟 × 速度，不是漂移**——量出来的数比被测对象大一个数量级。
+- **真正成因的证据**（整链 `navigation_sim` + `a3`，旁路 `pio --passive` 同时量里程计）：
+  `ready=PASS ready_delay_s=28.64`；`a3 result=ABORTED time_s=68.41 path_len_m=12.824
+  cross_samples=0 max_xy_err=5.495`；同期 point_lio 里程计 `truth_path_m=6.742`、
+  `max_xy_err=1.257`、`max_yaw=3.866°`。定位日志里退化**随运动恶化**：
+  `2/6 个方向不可观 (condition=3555.6 点面约束=789)` → `3/6 (condition=6497.6)` →
+  `4/6 (condition=14654.8 点面约束=1184)`，而 `no valid` / `not converged` 计数为 **0**
+  ——配准一直"成功"，只是解在退化方向上不受约束。时间线：Nav2 从 (6,4) 往**西南**开
+  （目标在 (2.0,7.4) 西北），10 s 内到 (3.19,0.12) **撞南墙卡住 46 s**，期间里程计误差稳定
+  0.19 m；t=57 s 里程计从 (-2.85,-3.70) **跳到 (-1.65,-3.66)（1.2 m）**而真值几乎没动。
+  定位位姿偏 5.5 m → Nav2 在错帧里规划 → 撞墙 ABORTED。**point_lio 同期只差 0.2 m，不是主因。**
+
+Consequences：
+
+- **README 新增 A12（里程计漂移可量）**：按「README 是唯一需求源」，`pio` 必须先在 README
+  立需求才算合规实现。A12 的阈值（`max_xy_err ≤ 0.05 m`、`max_yaw ≤ 0.5°`）直接取自下面的
+  A/B 实测，`--min-path` 守卫也写进判据。README §4 同时补上「点云是瞬时快照」的说明。
+- `accept.py` 新增 `pio` 子命令与全局 `--odom-topic`（默认 `/aft_mapped_to_init`，
+  point_lio 发的是**绝对名**，不吃 namespace）；`pio` 是本仓第一个会发 `cmd_vel` 的验收命令，
+  `--passive` 时不发。`finally` 里无条件补发零速，避免留下还在跑的控制指令污染下一次验收。
+- `pio` 有 **`ROBOT_DID_NOT_MOVE` 守卫**：真值位移低于 `--min-path`（默认 1.0 m）直接判 FAIL。
+  这条不是洁癖：`rmul_2027` 在 y=4 那条走廊只有 x∈[4.6,7.4]，从 (6,4) 出发**两个方向都只能走
+  1.35 m 就撞墙**，撞墙时"误差很小"是假象。干净长走廊在 **y≈2.0、x∈[0.2,7.2]**，
+  故 `pio` 默认 0.5 m/s × 12 s ≈ 6 m，起点用 (1.0, 2.0)。
+- `lio_eval` 的空阶段返回 `None` 而不是 0，区间外插值返回 `None` 而不外推：
+  "没量到"绝不能被读成"没误差"。
+- **新开项（不在本次范围）**：先验图配准在 7 m 见方、只有 6 个环有回波的场地里退化到 4/6，
+  需要 `diesel_localization` 侧的可观测性处置（退化方向不更新 / 换配准约束 / 补高程结构），
+  以及"首次配准失败无重试路径"（D26 已记）。两条都登记进 plan.md，各带触发条件。
+- **死参数留痕**：`point_lio/src/parameters.cpp:105-106` 读 `common.time_diff_lidar_to_imu`
+  但全仓无使用点；`li_initialization.cpp:5` 的 `time_lag_IMU_wtr_lidar` 恒 0、`:161` 用它减 IMU 戳。
+  **想靠这两个参数补时间偏置是无效的**，yaml 注释已写明。另：`laserMapping.cpp:628/658/748`
+  的 `dt` 全由实际时间戳差算出，不用 `imu_time_inte` 常量，"固定 dt 导致积分漂移"这条怀疑也排除。
+
+实现与验证（2026-11-16）：
+
+- 新增 `src/diesel_sim_tools/diesel_sim_tools/lio_eval.py` + `test/test_lio_eval.py`
+  （6 组断言，含"延迟不算漂移"的正反双向断言），`CMakeLists.txt` 的 `foreach` 加 `lio_eval`。
+- `accept.py`：`pio` 子命令、`/clock` 与里程计订阅、`TruthTrack` 时间对齐、`a3` 诊断量对齐。
+- 单测：`python3 src/diesel_sim_tools/test/test_lio_eval.py` → `PASS test_lio_eval`。
+- 整链回执（`ROS_DOMAIN_ID=91/92`、`GZ_PARTITION=plio91/plio92`，起点 (1.0,2.0)）：
+  `unit=2` → `pio samples=240 unaligned=0 truth_path_m=5.766 move_max_xy_err=0.0324
+  move_max_yaw=0.094 result=MEASURED verdict=PASS`（exit 0）；
+  `unit=0` → `move_max_xy_err=0.1013 move_max_yaw=1.066 verdict=FAIL`（exit 1）。
+  **量具能拦住那个有害的"修复"**，这是它存在的主要价值。
+- 测量纪律（沿用 D26）：每轮换新 `ROS_DOMAIN_ID` / `GZ_PARTITION`；链一次只能有一条，
+  旧链共发 `/clock` 会把 RTF 量成 2.4。跑 ROS 的脚本不要 `set -u`——
+  `source /opt/ros/humble/setup.bash` 会因 `AMENT_TRACE_SETUP_FILES` 未绑定而报错。
+
+回退：`lio_eval.py` 与 `test_lio_eval.py` 是纯新增，`pio` 是新增子命令，删除即回到 D26 的
+验收面；`point_lio_sim.yaml` 本次**只改注释**（`yaml.safe_load` 回读确认 `timestamp_unit` 仍为 2、
+`time_diff_lidar_to_imu` 仍为 0.0），无行为变更；`a3` 的 verdict 判据未动。
+
+---
+
 ## D32 点云用「gz sensor 插件 + 官方 Livox 角度表」做非重复扫描，替换规则网格快照
 
 Context：旧仿真点云是 `gpu_lidar` 的**规则网格瞬时快照**（`width=1875` × `height=32`，一帧
