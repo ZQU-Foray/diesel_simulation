@@ -889,7 +889,11 @@ def cmd_livox(node, args):
     不是「出点 200k/s」——实际出点数由环境命中决定（本场地约 10%），不作判据（D32 口径修正）。
     """
     if CustomMsg is None:
-        log_kv("livox ", verdict="FAIL", reason="livox_ros_driver2 不可用，无法量 CustomMsg")
+        log_kv(
+            "livox ",
+            verdict="FAIL",
+            reason="livox_ros_driver2 不可用，无法量 CustomMsg",
+        )
         return 1
 
     frames = []
@@ -957,9 +961,7 @@ def cmd_livox(node, args):
     # A2 覆盖：最大 offset 应接近一帧 0.1s（说明采满了 ~20000 方向），且不超过一帧。
     # 注意：高序号方向多朝上打空（miss 不进消息），offset_max 只反映最后「命中」的方向，
     # 会略低于 99.995ms——所以它只做覆盖下限 sanity，不用来反推采样率（D32 口径）。
-    offset_cover_ok = (
-        0.08 * LIVOX_FRAME_SPAN_NS <= offset_max_ns < LIVOX_FRAME_SPAN_NS
-    )
+    offset_cover_ok = 0.08 * LIVOX_FRAME_SPAN_NS <= offset_max_ns < LIVOX_FRAME_SPAN_NS
     # A3：帧率≈10Hz（仿真时间戳量）+ offset 落在 5µs 网格（=200k 方向/s）+ 帧内覆盖。
     # 采样率 = 每帧方向数(配置 20000) × 实测帧率；miss 不进消息，无法从命中点反推方向总数，
     # 故按配置 nominal 报，并标明。5µs 网格 + 10Hz 帧率本身已锁定 200k 方向/s。
@@ -1069,9 +1071,14 @@ def main(argv=None):
         help="采样期要求链路真的掉线（配合人工停一端），并断言 500 ms 内检出",
     )
 
-    livox = subparsers.add_parser("livox", help="Livox 非重复扫描质量（A13 / A1–A4，D32）")
+    livox = subparsers.add_parser(
+        "livox", help="Livox 非重复扫描质量（A13 / A1–A4，D32）"
+    )
     livox.add_argument(
-        "--duration", type=float, default=3.0, help="采样多少秒（默认 3s≈30 帧，<40 帧表周期）"
+        "--duration",
+        type=float,
+        default=3.0,
+        help="采样多少秒（默认 3s≈30 帧，<40 帧表周期）",
     )
 
     args, ros_args = parser.parse_known_args(argv[1:])

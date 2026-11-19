@@ -22,7 +22,11 @@ navigation_sim.launch.py 里，这样单独调点云时不必拖起整链。
 
 import os
 
-from ament_index_python.packages import get_package_prefix, get_package_share_directory
+from ament_index_python.packages import (
+    PackageNotFoundError,
+    get_package_prefix,
+    get_package_share_directory,
+)
 from launch import LaunchDescription
 from launch.actions import (
     AppendEnvironmentVariable,
@@ -206,7 +210,8 @@ def _assemble(context, share_dir):
         actions.append(
             AppendEnvironmentVariable("IGN_GAZEBO_SYSTEM_PLUGIN_PATH", livox_plugin_lib)
         )
-    except Exception:
+    # 未装插件时 gz 会报插件缺失，那才是定位依据；launch 本身不该因此中断。
+    except PackageNotFoundError:
         pass
 
     # -r 立刻开跑；headless 时用 -s 只跑服务器（服务器/CI 只跑物理与传感器）
