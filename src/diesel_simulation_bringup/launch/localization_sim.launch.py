@@ -1,12 +1,13 @@
 # Copyright 2026 ZQU-Foray
 #
-# 「点云 → 定位」整链：场地仿真 + 机器人 + gz 桥 + 点云时序修复 + point_lio + diesel_localization。
+# 「点云 → 定位」整链：场地仿真 + 机器人 + Livox 非重复扫描插件 + point_lio + diesel_localization。
 #
-# 数据链：
-#   gpu_lidar ──桥──> /livox/lidar ──ign_sim_pointcloud_tool──> /velodyne_points ──> point_lio
-#                                              └─ 补 time / ring（仿真点云没有逐点时间戳）
+# 数据链（D32）：
+#   LivoxMid360System 插件（自持 GpuRays，按官方角度表采样）
+#       ├─ /livox/lidar（CustomMsg，带真实逐点 offset_time）──> point_lio（lidar_type=1）
+#       └─ /livox/lidar_points（PointCloud2，同帧同点集）──> diesel_localization 的 cloud
 #   /aft_mapped_to_init（point_lio 里程计）──> diesel_localization 的 odom
-#   /livox/lidar（原始点云，帧 front_mid360）──> diesel_localization 的 cloud
+#   model.sdf 里的 gpu_lidar 缩成 32×4，仅作渲染初始化触发器，其点云不桥接。
 #
 # 定位节点用 `diesel_localization_bringup` 自带的兵种参数（sentry.yaml）当基线，
 # 只覆盖仿真相关项，避免两处默认值漂移。
@@ -157,24 +158,9 @@ def _assemble(context, share_dir):
         condition=IfCondition(LaunchConfiguration("body_tf")),
     )
 
-    # 环号重排参数必须与传感器视场一致：samples=线数、ang_res_y=垂直视场/(线数-1)、
-    # ang_bottom 是下沿角度的绝对值（上游 point_cloud_converter.cpp:66 的换算，
-    # 传负号会让正常回波全被丢掉，D11）。
-    cloud_tool = Node(
-        package="ign_sim_pointcloud_tool",
-        executable="ign_sim_pointcloud_tool_node",
-        name="ign_sim_pointcloud_tool",
-        output="screen",
-        parameters=[
-            {
-                "pcd_topic": "/livox/lidar",
-                "n_scan": lidar.channels,
-                "horizon_scan": lidar.horizontal_samples,
-                "ang_bottom": lidar.ang_bottom,
-                "ang_res_y": lidar.ang_res_y,
-            }
-        ],
-    )
+    # D32：不再启动 ign_sim_pointcloud_tool。它给规则网格点云合成不存在的逐点扫掠
+    # （point_cloud_converter.cpp:74），是 D31 判定「故意正确」的假时间戳来源。现在
+    # LivoxMid360System 插件直发带真实逐点 offset_time 的 CustomMsg，假扫掠转换器退役。
 
     # point_lio 用开头的 IMU 数据做重力对齐（IMU_Processing::Set_init 用 mean_acc 定 gravity），
     # 而 gazebo 起机头几秒机器人还在沉降、IMU 上有大幅瞬时加速度；此时初始化会把重力方向
@@ -219,8 +205,10 @@ def _assemble(context, share_dir):
             "use_sim_time": True,
             "map_manifest": os.path.join(field.localization_dir, "manifest.yaml"),
             "verify_map_hashes": True,
-            # 仿真里点云没有逐点时间戳，定位直接用原始桥出点云；里程计来自 point_lio
-            "cloud_topic": "/livox/lidar",
+            # D32：/livox/lidar 现在是插件直发的 CustomMsg（给 point_lio 的 Livox 路径）。
+            # diesel_localization 只订 PointCloud2，故吃插件同帧另发的 /livox/lidar_points。
+            # 里程计仍来自 point_lio。
+            "cloud_topic": "/livox/lidar_points",
             "odom_topic": "/aft_mapped_to_init",
             # 仿真里的雷达是全 360°（model.sdf 的 min/max_angle=±π），而 sentry.yaml 为实车
             # 30° 视场准备。这里显式改成 360°：留 30° 会让 60000 点先被裁到 ~5000 点、
@@ -270,7 +258,6 @@ def _assemble(context, share_dir):
         sim_include,
         lidar_tf,
         body_tf,
-        cloud_tool,
         point_lio,
         map_server,
         localization,

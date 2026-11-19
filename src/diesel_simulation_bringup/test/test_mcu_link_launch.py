@@ -72,6 +72,58 @@ def _forwarded(tree: ast.Module, source: str) -> set[str]:
     return found
 
 
+def _string_literals(node: ast.AST) -> set[str]:
+    """一棵子树里出现过的全部字符串字面量。"""
+    return {
+        child.value
+        for child in ast.walk(node)
+        if isinstance(child, ast.Constant) and isinstance(child.value, str)
+    }
+
+
+def _yields_cmd_vel(text: str) -> bool:
+    """`simulation.launch.py` 是否在 mcu_link 路径上让出了 `cmd_vel`。
+
+    只认字面量会和实现形态耦合：最初写的是
+    `skip_ids=("cmd_vel",) if mcu_link else ()`，后来 lidar_points 成了
+    常驻跳过项，写法变成「先建列表、mcu_link 时再 append」，行为没变而
+    字面量消失，断言因此假红（D32 合并时撞上）。所以改成看语义：
+
+      1. `skip_ids=<值>` 的实参里出现 `"cmd_vel"`（元组字面量的老写法）；
+      2. 或者名为 `skip_ids` 的容器在构造里含 `"cmd_vel"`（`[... "cmd_vel" ...]`）；
+      3. 或者 `skip_ids.append("cmd_vel")` / `skip_ids.insert(...)` 这类原地追加。
+
+    命中在不在 if 分支里不追究：断言的是「mcu_link 为真时这条桥会被跳过」
+    这一意图能否从源码读出来，守卫 `mcu_link` 本身由上面那组参数用例负责。
+    """
+    tree = ast.parse(text)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            for keyword in node.keywords:
+                if keyword.arg == "skip_ids" and "cmd_vel" in _string_literals(
+                    keyword.value
+                ):
+                    return True
+            # skip_ids.append("cmd_vel") / skip_ids.insert(0, "cmd_vel")
+            owner = node.func.value if isinstance(node.func, ast.Attribute) else None
+            if (
+                isinstance(node.func, ast.Attribute)
+                and isinstance(owner, ast.Name)
+                and owner.id == "skip_ids"
+                and "cmd_vel" in _string_literals(node)
+            ):
+                return True
+        elif isinstance(node, ast.Assign):
+            for target in node.targets:
+                if (
+                    isinstance(target, ast.Name)
+                    and target.id == "skip_ids"
+                    and "cmd_vel" in _string_literals(node.value)
+                ):
+                    return True
+    return False
+
+
 def main() -> int:
     problems: list[str] = []
 
@@ -135,7 +187,7 @@ def main() -> int:
             "simulation.launch.py 没起 diesel_sim_mcu/sim_mcu_bridge —— "
             "mcu_link:=true 时没人把命令写进 gz"
         )
-    if 'skip_ids=("cmd_vel",)' not in sim_text:
+    if not _yields_cmd_vel(sim_text):
         problems.append(
             "simulation.launch.py 没在 mcu_link 时让出 cmd_vel 这条桥接契约，"
             "过渡桥与 ros_gz_bridge 会同时发布 gz 的 /cmd_vel"

@@ -126,6 +126,23 @@ diesel_simulation/
     │   │   └── sim_mcu_bridge.cpp             #   发控制快照；固件确认后写 gz，失联归零
     │   └── test/
     │       └── test_sim_mcu_bridge.py         #   A10：失联兜底与桥接契约的静态断言
+    ├── diesel_sim_livox/                       # Livox Mid-360 非重复扫描 gz sensor 插件（D32）
+    │   ├── package.xml                        #   ament_cmake，livox_ros_driver2/point_lio QUIET 缺则跳过
+    │   ├── CMakeLists.txt                     #   ignition-gazebo6 先于 rclcpp/livox 查找（jsoncpp 目标冲突）
+    │   ├── scan_mode/
+    │   │   ├── README.md                      #   角度表来源与口径说明
+    │   │   └── mid360.csv.gz                  #   官方角度表 800000 点 = 40 帧 × 20000（line=i%4）
+    │   ├── include/diesel_sim_livox/
+    │   │   └── pattern.hpp                    #   PatternTable / RangeGrid / SampleFrame 纯核心 API
+    │   ├── src/
+    │   │   ├── pattern.cpp                    #   角度表加载 + 反深度双线性采样（不连续比 1.25）
+    │   │   └── livox_mid360_system.cpp        #   world 插件：GpuRays 2048×336 渲染线程采样，同帧发 CustomMsg + PointCloud2
+    │   └── test/
+    │       ├── fixtures/
+    │       │   └── mini_pattern.csv           #   小型角度表夹具（单测用）
+    │       ├── pattern_test.cpp               #   34 断言：角度表 / 采样 / 帧生成
+    │       ├── test_pattern.py                #   纯核心 pytest
+    │       └── test_package.py                #   包断言
     └── diesel_simulation_bringup/              # 启动层：把仿真器接到本仓算法上
         ├── package.xml                        #   ament_cmake，exec_depend 上游与自研包
         ├── CMakeLists.txt                     #   安装 launch/config/rviz/models/map + scripts
@@ -188,6 +205,7 @@ diesel_simulation/
 | `diesel_rmul_2027_field` | 场地几何、材质、地图基准、场地规格文档 | 不放 launch、不写节点 |
 | `diesel_simulation_bringup` | 世界组装、机器人 spawn、桥接、参数、一键脚本 | 不实现定位/导航算法（那是 `diesel_localization` / `diesel_navigation`） |
 | `diesel_sim_mcu` | 过渡桥：上位机侧 RoboLink 会话 ↔ gz 车体速度（D30） | 不实现协议编解码（用 `diesel_platform::link`）；不驱动云台/发射机构 |
+| `diesel_sim_livox` | Livox Mid-360 非重复扫描：官方角度表 + GpuRays 进程内采样，同帧发 CustomMsg + PointCloud2（D32） | 不做帧内运动畸变的物理仿真（单帧瞬时快照采样）；不实现定位算法 |
 | `map/rmul_2027` | 定位侧先验（点云 + 栅格 + 清单） | 不做运行时修改；重新生成靠脚本 |
 | `map/nav2` | 导航侧栅格（官方图的派生副本 + 差异断言） | 不改官方图；差异必须落在隧道开放段内 |
 | `tools/`（field 包内） | 上游资产生成与审计脚本，供追溯 | 不被安装、不被运行时依赖 |

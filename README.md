@@ -12,7 +12,7 @@ ZQU-Foray 的 RMUL 2027 3v3 **场地仿真仓**：在 Gazebo 里搭出赛季场�
 | 编号 | 需求 | 验收口径 |
 |---|---|---|
 | A0 | 场地资产可用 | `diesel_rmul_2027_field` 的世界能在 Gazebo 启动、无报错加载 |
-| A1 | 32 线点云 | `/livox/lidar` 上 PointCloud2 为 **32 线**（`height=32`）、`width=1875`、nominal **10 Hz**（MID-360 实际出点率）；软件渲染 CI 实测 ≥ 6.5 Hz、GPU 直通达 10 Hz；`/livox/imu` 配置 `update_rate: 200`，实测随 RTF 缩放（软件渲染约 156 Hz） |
+| A1 | Livox 非重复点云 | `/livox/lidar` 为 `livox_ros_driver2/CustomMsg` **非重复扫描**（官方 mid360 角度表逐点采样，质量见 A13，D32）；同帧伴生 `/livox/lidar_points` PointCloud2 供 `diesel_localization`（它只订 PointCloud2）；nominal **10 Hz**（仿真时间）；`/livox/imu` 配置 `update_rate: 200`，实测随 RTF 缩放 |
 | A2 | 定位收敛 | `diesel_localization` 在仿真里 10 s 内状态 OK，位置误差 < 0.30 m、朝向误差 < 5° |
 | A3 | 寻路可达 | Nav2 把机器人从起点送到隧道对侧（净空 0.2495 m 的场地几何）`SUCCEEDED`，且轨迹采样点（≥ 5 Hz）至少一个落在隧道顶投影 x 3.325–3.675 / y 7.06–7.86 内 |
 | A4 | 地图契约 | manifest 哈希与 `diesel_localization` 一致，篡改 1 字节必须拒绝启动 |
@@ -24,6 +24,7 @@ ZQU-Foray 的 RMUL 2027 3v3 **场地仿真仓**：在 Gazebo 里搭出赛季场�
 | A10 | 下位机链路可用 | `mcu_link:=true` 时 `/cmd_vel` 经虚拟 USB CDC 交给**下位机固件源码**（`foray_mcu` 的 `host_sim` 后端），上位机 `RoboLinkHostLink` 状态稳定为 `Active`，固件侧 `robolink::Session` 进 `Ready/Active`；停掉任一端后 **≤500 ms** 双方判活失败，`/cmd_vel` 归零。链路只覆盖底盘平面速度，云台/发射机构不驱动（协议未冻结，见 D30） |
 | A11 | 链路自检 | `accept.py link` 打印 `link_state` / `hello_rtt_ms` / `status_hz` / `frame_errors` / `drop_detect_ms`，并在「握手未完成、状态帧断流（持续超过 500 ms）、失联未在 500 ms 内触发」时非零退出；加 `--expect-drop` 时额外要求「链路确实断过，且从最后一帧到判定断开 ≤ 540 ms」——由人停一端触发，停不下来就是 FAIL，不把「一直没断」当成「失联检测正常」 |
 | A12 | 里程计漂移可量 | `accept.py pio` 用开环运动（静止 → 直行 → 刹停）量 `/aft_mapped_to_init` 相对真值的**位移**误差：真值插值到里程计自己的 `header.stamp`、首帧刚体对齐，运动段 `max_xy_err ≤ 0.05 m` 且 `max_yaw ≤ 0.5°`；真值位移不足 `--min-path`（默认 1.0 m）时判 FAIL（车没走起来时「误差很小」是假象）。`--passive` 时不发 `cmd_vel`，只旁路观测，用来把「里程计漂了」与「先验图配准漂了」分开。阈值来自 D31 的 A/B 实测，不是拍脑袋 |
+| A13 | 非重复扫描质量 | `accept.py livox` 对 `/livox/lidar` 断言四项（D32）：**a1_nonrepeat** 相邻帧方向集合 novelty ≥ 0.5（规则网格重复图案会趋近 0，实测 0.96）；**a2_offset** 帧内 `offset_time` 严格递增、落 5 µs 网格、覆盖一帧 [80 ms, 100 ms)；**a3_rate** 帧率 ≈ 10 Hz（仿真时间）且 nominal 采样率 = 20000 方向/帧 × 帧率 ≈ 200k 方向/s（出点数由环境命中决定，不要求 200k 点/s）；**a4_msg** `line ∈ [0,4)`、`tag` 合法、`point_num` 与实际点数一致。四项全 PASS 才 verdict=PASS |
 
 进度与阶段划分见 `plan.md`；关键取舍见 `decision.md`。
 
@@ -36,7 +37,7 @@ ZQU-Foray 的 RMUL 2027 3v3 **场地仿真仓**：在 Gazebo 里搭出赛季场�
 | ROS 2 **Humble** | 整链基线 | 无，与 `diesel_ws` 及本地容器工具链保持一致 |
 | **Ignition Gazebo Fortress（gz-sim 6.18）** | 仿真器（本仓选择） | 装配与资产，见 `decision.md` D1 |
 | `ros_gz_bridge` / `ros_gz_sim` | 桥（本仓选择） | `config/bridge.yaml` 的桥接契约与渲染 |
-| `point_lio` | 上游算法，由 `diesel_localization` 依赖 | 仿真点云补 `time` 字段后可直接喂 |
+| `point_lio` | 上游算法，由 `diesel_localization` 依赖 | 插件直发 `CustomMsg`，`avia_handler` 直接用逐点 `offset_time`，不再补假 `time` 字段（D32） |
 | `diesel_localization` | 上游仓 | 只提供 manifest 与地图（A4） |
 | `nav2_bringup` + `pb_omni_pid_pursuit_controller` | 下游仓 `diesel_navigation` | 提供场地与参数标定环境，参数从仿真实测标定 |
 
@@ -54,6 +55,10 @@ diesel_simulation/
 │   │   └── tools/                    # 上游审计/生成脚本（只读参考）
 │   ├── diesel_sim_tools/              # 装配库（纯 Python：引擎适配 / 桥接渲染 / profile / 漂移口径）
 │   ├── diesel_sim_mcu/                # 过渡桥（RoboLink 从机侧 ↔ gz 车体速度，D30）
+│   ├── diesel_sim_livox/              # Livox Mid-360 非重复扫描 gz sensor 插件（D32）
+│   │   ├── scan_mode/mid360.csv.gz    # 官方角度表（800000 点 = 40 帧 × 20000）
+│   │   ├── src/                       # 纯核心 pattern + GpuRays 采样插件
+│   │   └── test/                      # pattern 单测 + 包断言
 │   └── diesel_simulation_bringup/     # 装配层（launch / profile / 桥接契约 / 地图 / 脚本）
 │       ├── map/rmul_2027/            # PCD + PGM + manifest.yaml（定位侧输入）
 │       ├── map/nav2/                 # 派生导航栅格（只清隧道顶投影，见 D16）
@@ -107,9 +112,10 @@ diesel_simulation/
 
 ```
 gz-sim 场地世界 (rmul_2027.sdf)
-   └─ gpu_lidar + imu ─ ros_gz_bridge ─► /livox/lidar  /livox/imu
-                                            │
-                     ign_sim_pointcloud_tool（合成 time 字段，见下方注）
+   ├─ diesel_sim_livox 插件（GpuRays + 官方 mid360 角度表，D32）
+   │       ├─► /livox/lidar（CustomMsg 非重复）──────────► point_lio（avia_handler）
+   │       └─► /livox/lidar_points（PointCloud2，同帧）──► diesel_localization（重定位）
+   └─ imu ─ ros_gz_bridge ─► /livox/imu
                                             ▼
                                       point_lio ──► /aft_mapped_to_init（camera_init→body）
                                             │
@@ -131,7 +137,15 @@ gz-sim 场地世界 (rmul_2027.sdf)
 
 下行有两档：默认档把 `/cmd_vel` 直接桥进 gz，用来跑验收；`mcu_link:=true` 时接上虚拟下位机链路（§3.2），用来验证「上位机 ↔ 下位机」这段接口在仿真里也是真的。
 
-**点云是瞬时快照，不是扫掠**（D31）：gz 的 `gpu_lidar` 一帧 60000 条射线在同一时刻、同一位姿下渲染完成，桥过来的 `/livox/lidar` 连逐点 `time` 字段都没有。`ign_sim_pointcloud_tool` 按 `(point_id % 1875) * 0.1 / 1875` 合成的 0…0.1 s 是**不存在的扫掠**；`point_lio_sim.yaml` 故意用 `timestamp_unit: 2`（µs）把它压回 ≈0，这才是快照的物理真相。**不要顺手改成 0**——实测会把 5.77 m 直行的误差从 0.032 m 抬到 0.101 m，`accept.py pio` 会判 FAIL。
+**点云现在有真实扫掠**（D32）：`diesel_sim_livox` 插件按官方 `mid360.csv` 非重复角度表逐点发射线，
+逐点 `offset_time` 落 5 µs 网格、覆盖一帧 0…100 ms，`point_lio` 走 `avia_handler`（`lidar_type: 1`）
+直接消费，不再需要任何假时间字段合成者。
+
+历史留痕（D31，勿删）：D32 之前是 gz `gpu_lidar` 的**瞬时快照**——一帧 60000 条射线在同一时刻、
+同一位姿下渲染完成，`/livox/lidar` 连逐点 `time` 都没有；`ign_sim_pointcloud_tool` 按
+`(point_id % 1875) * 0.1 / 1875` 合成了那个**并不存在**的 0…0.1 s 扫掠，配置里才要用
+`timestamp_unit: 2`（µs）把它压回接近 0（unit=0 实测 5.77 m 直行误差 0.101 m，FAIL）。
+转换器今已退役；**若将来回退到 gpu_lidar 快照链，必须恢复 `timestamp_unit: 2`**。
 
 先验地图与栅格**同源**：两者都从场地网格派生，因此定位与 Nav2 不会各说各话。
 不过两者的**判据不同**：定位吃官方 PGM 的稠密占据面，Nav2 需要底盘可通行栅格，

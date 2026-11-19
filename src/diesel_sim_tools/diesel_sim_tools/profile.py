@@ -208,7 +208,7 @@ def load_robot(path, *, share_lookup=None):
     if abs(ang_res_y - expected) > _ANGLE_TOLERANCE:
         raise AssemblyError(
             f"{where} 的 lidar.ang_res_y={ang_res_y} 与 vertical_fov_deg/(channels-1)"
-            f"={expected} 不一致；ign_sim_pointcloud_tool 的环号重排会因此错位"
+            f"={expected} 不一致；雷达视场规格内部矛盾，环号与俯仰角会对不上"
         )
 
     lidar = Lidar(
